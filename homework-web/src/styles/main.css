@@ -1,0 +1,36 @@
+/* 全局样式：只放最基础的重置与变量，组件样式写在组件内 */
+:root {
+  --sc-page-bg: #f5f7fa;
+  --sc-header-h: 56px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  color: #303133;
+  background: var(--sc-page-bg);
+}
+
+/* 顶部身份条：机房共用电脑场景需要一眼看到"现在是谁登录着" */
+.sc-session-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-weight: 600;
+}

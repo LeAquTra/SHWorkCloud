@@ -1,0 +1,37 @@
+# ============================================================================
+# 本地开发配置模板
+#
+# 使用方法：复制本文件为 application-local.yaml 并填入真实值。
+#   application-local.yaml 已被 .gitignore 排除，禁止提交到版本库。
+#
+#   copy application-local.yaml.example application-local.yaml
+# ============================================================================
+
+spring:
+  datasource:
+    password: 你的本地数据库密码
+  mail:
+    # 仅当 app.register.enabled=true 时才需要填写
+    username: 你的QQ邮箱
+    password: 你的QQ邮箱SMTP授权码
+
+aliyun:
+  oss:
+    bucket-name: 你的测试Bucket
+  sts:
+    # RAM 子用户 AK/SK；禁止提交真实值
+    access-key-id: 你的AK
+    access-key-secret: 你的SK
+    role-arn: acs:ram::你的账号ID:role/oss-homework-role
+
+app:
+  # QQ 邮箱自助注册（可选通道）。机房场景建议保持 false，用名单导入开账号。
+  register:
+    enabled: false
+  import:
+    # 学生统一初始密码；留空则由系统按规则生成
+    default-password: Sh@2026
+  admin:
+    init-email: 你的QQ邮箱
+    # 超管初始密码；留空则应用启动时直接报错（不允许空密码初始化超管）
+    init-password: 换成强密码

@@ -1,0 +1,30 @@
+# ============================================================================
+# 生产配置：所有敏感值均取自环境变量，且不设默认值（缺失时启动失败 = fail fast）
+# ============================================================================
+spring:
+  datasource:
+    password: ${DB_PASSWORD}
+  mail:
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_AUTH_CODE}
+
+sa-token:
+  is-log: false
+
+aliyun:
+  oss:
+    bucket-name: ${OSS_BUCKET_NAME}
+  sts:
+    access-key-id: ${STS_AK}
+    access-key-secret: ${STS_SK}
+    role-arn: ${STS_ROLE_ARN}
+
+app:
+  # 生产环境必须显式提供超管初始密码，避免出现公开后门
+  admin:
+    init-password: ${ADMIN_INIT_PASSWORD}
+
+logging:
+  level:
+    root: info
+    com.leaqutra.shworkcloud: info

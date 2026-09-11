@@ -1,0 +1,31 @@
+{
+  "name": "homework-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "作业云盘前端（Vue 3 + Vite + TypeScript + Element Plus）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "2.3.2",
+    "axios": "1.18.1",
+    "element-plus": "2.14.2",
+    "pinia": "3.0.4",
+    "vue": "3.5.40",
+    "vue-router": "4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.4",
+    "typescript": "5.5.4",
+    "vite": "5.4.21"
+  },
+  "overrides": {
+    "@vue/devtools-api": "7.7.9",
+    "@vue/devtools-kit": "7.7.9",
+    "@vue/devtools-shared": "7.7.9"
+  },
+  "//": "overrides 说明：本机 npm 缓存中只有 devtools 7.7.9，而上游要求 ^7.7.10。它只是构建期 devtools，锁补丁版本无影响；恢复外网后可删除 overrides 整块。"
+}

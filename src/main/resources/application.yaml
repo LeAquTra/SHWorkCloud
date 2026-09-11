@@ -1,0 +1,150 @@
+spring:
+  application:
+    name: SHWorkCloud
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
+  # ---------- 数据源 ----------
+  datasource:
+    # 必须使用 Asia/Shanghai：全链路北京时间，作业截止时间判断依赖它
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:shwork_cloud}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
+      max-lifetime: 1800000
+
+  # ---------- Redis（Jedis 客户端：配置键必须是 jedis.pool） ----------
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 5000ms
+      jedis:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms
+
+  # ---------- multipart（仅管理员题库上传等场景；用户文件走 OSS 直传不经过此处） ----------
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+  # ---------- 邮件（仅自助注册辅通道使用） ----------
+  mail:
+    host: smtp.qq.com
+    port: 587
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_AUTH_CODE:}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+
+server:
+  port: ${SERVER_PORT:8081}
+  servlet:
+    context-path: /api
+  shutdown: graceful
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      # 不配置全局 logic-delete-field：file_entry 无 deleted 列，用全局配置容易误伤。
+      # 逻辑删除只在 SysUser.deleted 上用 @TableLogic 声明。
+      id-type: auto
+  mapper-locations: classpath*:mapper/**/*.xml
+
+sa-token:
+  token-name: Authorization
+  timeout: 14400            # 4 小时（机房共用电脑，不宜过长）
+  active-timeout: 1800      # 30 分钟无操作自动失效
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+aliyun:
+  oss:
+    endpoint: ${OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}
+    region: ${OSS_REGION:cn-beijing}
+    bucket-name: ${OSS_BUCKET_NAME:}
+    key-prefix: homework
+    base-url: ${OSS_BASE_URL:}
+  sts:
+    access-key-id: ${STS_AK:}
+    access-key-secret: ${STS_SK:}
+    role-arn: ${STS_ROLE_ARN:}
+    duration-seconds: 1800
+
+app:
+  register:
+    enabled: true                        # 自助注册：用户可自行注册登录
+    # 图片验证码依赖后台先维护题库；题库为空时若强制要求会挡住所有注册，故默认不要求
+    require-image-captcha: false
+    # 邮件验证码：false 时只写日志（仅限开发联调；prod 下启动会直接失败）
+    mail-enabled: true
+    email-pattern: '^\d{5,11}@qq\.com$'
+  import:
+    strategy: skip                       # skip | update | fail
+    default-password: ${IMPORT_DEFAULT_PASSWORD:}
+    max-rows: 2000
+    max-file-size-bytes: 5242880
+  quota:
+    default-bytes: 2147483648            # 2GB
+  upload:
+    max-file-size-bytes: 2147483648      # 单文件上限 2GB
+    min-free-bytes: 1048576
+    # uploadToken 有效期：必须够传完一个大文件（机房共享带宽下 500MB 可能要十几分钟）
+    upload-token-seconds: 7200
+    instant-threshold-bytes: 209715200   # >200MB 用抽样指纹
+  captcha:
+    image-url-expire-seconds: 300
+    session-expire-seconds: 300
+    max-fail: 3
+    click-tolerance-px: 30
+    id-cache-seconds: 60
+  security:
+    internal-networks:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 127.0.0.1/32
+    trust-proxy: true                    # 仅在 Nginx 之后为 true；直连必须 false
+    login-max-fail: 5
+    login-lock-minutes: 10
+    public-ip-hour-limit: 200
+  recycle:
+    enabled: true                         # false = 删除即彻底删除（索引 + OSS 对象）
+    retention-days: 30
+  # OSS 与数据库对账：清理无人引用的垃圾对象，保证 Bucket 整洁
+  storage:
+    reconcile:
+      enabled: true
+      grace-hours: 24                    # 宽限期内的对象不动，避免误删正在上传的
+      max-objects: 200000                # 单次扫描上限，防止任务跑太久
+
+  classroom:
+    idle-logout-minutes: 20
+    checkout-warn-minutes: 5
+  admin:
+    init-username: ${ADMIN_USERNAME:admin}
+    init-email: ${ADMIN_EMAIL:}
+    init-password: ${ADMIN_INIT_PASSWORD:}
