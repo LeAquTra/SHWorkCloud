@@ -161,7 +161,19 @@ function putBlob(url: string, blob: Blob, options: PutOptions): Promise<string> 
         )
       }
     }
-    xhr.onerror = () => reject(new ApiError(-1, '网络错误，上传中断'))
+    // ⚠️ onerror 只在"网络层失败"时触发；HTTP 403/404 会走上面的 onload。
+    // 直传 OSS 是跨域请求，而 PUT 不属于 CORS 简单方法（只有 GET/HEAD/POST 是），
+    // 浏览器必然先发 OPTIONS 预检；桶上没有匹配的跨域规则时预检就被拦，
+    // 表现就是这个 onerror —— 所以这里必须把"去查 CORS"写进提示，
+    // 否则只能看到一句无从下手的"网络错误"。
+    xhr.onerror = () =>
+      reject(
+        new ApiError(
+          -1,
+          '无法连接 OSS（请求被浏览器中断）。请检查 OSS 桶的跨域(CORS)规则：' +
+            '来源需包含本站地址，允许的方法需含 PUT，且需暴露 ETag',
+        ),
+      )
     xhr.ontimeout = () => reject(new ApiError(-1, '上传超时'))
     xhr.onabort = () => reject(new DOMException('aborted', 'AbortError'))
     const onAbort = () => xhr.abort()
@@ -424,6 +436,16 @@ async function uploadMultipart(args: MultipartArgs): Promise<number> {
           recompute()
         },
       })
+      // 成功的分片 PUT，OSS 一定会返回 ETag。
+      // 取不到只可能是跨域规则没暴露它（缺 Access-Control-Expose-Headers: ETag）。
+      // 这种情况若继续往下走，会在 complete 阶段报一个完全看不懂的 OSS 错误，
+      // 所以在这里就拦下来，直接告诉运维该改哪里。
+      if (!etag) {
+        throw new ApiError(
+          -1,
+          'OSS 未返回 ETag：请在 OSS 桶的跨域规则里把 ETag 加入「暴露 Headers（Expose-Headers）」',
+        )
+      }
       partial.delete(partNumber)
       doneParts.set(partNumber, etag)
       completedBytes += end - start

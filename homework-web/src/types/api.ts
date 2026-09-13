@@ -228,6 +228,21 @@ export interface AdminUserVO {
   createTime: string
 }
 
+/**
+ * 后台代改用户资料（`PUT /admin/users/{id}`）。
+ *
+ * **部分更新语义**：只有出现在对象里的键才会被修改，其余保持不变；
+ * 传空串 `''` 表示**清空**该字段。所以不要图省事把整行对象直接扔进来 ——
+ * 那会把没想改的字段也一起清掉。
+ */
+export interface AdminUpdateProfileReq {
+  realName?: string
+  studentNo?: string
+  className?: string
+  email?: string
+  nickname?: string
+}
+
 export interface ResetPasswordVO {
   userId: number
   username: string

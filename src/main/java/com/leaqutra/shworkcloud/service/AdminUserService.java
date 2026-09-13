@@ -18,11 +18,14 @@ import com.leaqutra.shworkcloud.security.UserCache;
 import com.leaqutra.shworkcloud.vo.AdminVo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 后台用户管理。
@@ -48,6 +51,27 @@ public class AdminUserService {
     private final OssSignService ossSignService;
     private final AuditService auditService;
     private final LoginUser loginUser;
+
+    /** 后台代改资料时允许修改的字段（顺序即文档顺序） */
+    private static final Set<String> EDITABLE_FIELDS =
+            Set.of("realName", "studentNo", "className", "email", "nickname");
+
+    /**
+     * 不允许走「代改资料」的字段，以及它们各自的专用接口。
+     * <p>这类字段要么能锁死账号（status / password），要么能提权（role），
+     * 要么有独立的对象存储副作用（avatar），必须走各自的接口而不是被顺手改掉。
+     */
+    private static final Map<String, String> REDIRECTED_FIELDS = Map.of(
+            "username", "登录名是登录凭据，不支持修改；如需更换请重建账号",
+            "role", "请用 PUT /api/admin/users/{id}/role",
+            "status", "请用 PUT /api/admin/users/{id}/status",
+            "storageQuota", "请用 PUT /api/admin/users/{id}/quota",
+            "quotaBytes", "请用 PUT /api/admin/users/{id}/quota",
+            "password", "请用 PUT /api/admin/users/{id}/reset-password",
+            "usedStorage", "请用 PUT /api/admin/users/{id}/recalc-storage",
+            "avatar", "头像由用户自己在个人资料页上传：POST /api/user/avatar",
+            "avatarKey", "头像由用户自己在个人资料页上传：POST /api/user/avatar",
+            "avatarUrl", "头像由用户自己在个人资料页上传：POST /api/user/avatar");
 
     // ---------------------------------------------------------------- 查询
 
@@ -236,6 +260,99 @@ public class AdminUserService {
         auditService.log(loginUser.id(), "STORAGE_RECALC", "USER", String.valueOf(id),
                 clientIp, true, "diff=" + diff);
         return diff;
+    }
+
+    /**
+     * 后台代改用户资料（<b>部分更新</b>）。
+     * <p>
+     * 允许的键：{@code realName} / {@code studentNo} / {@code className} / {@code email} / {@code nickname}。
+     * <ul>
+     *   <li><b>不传的键不改动</b>（不是全量覆盖），避免"只想改班级结果把邮箱清空"；</li>
+     *   <li>传空串表示<b>清空</b>该字段；</li>
+     *   <li>登录名 / 角色 / 状态 / 配额 / 密码 / 头像各有专用接口，这里会明确拒绝并告知该用哪个。</li>
+     * </ul>
+     * 之所以收 {@code Map} 而不是 record：只有 {@code Map} 才能区分
+     * "键不存在"（不改）与"键存在但值为 null"（清空）。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void updateProfile(Long id, Map<String, Object> body, String clientIp) {
+        SysUser user = mustExist(id);
+        // 注意：这里刻意**不**调用 guardSuperAdmin ——
+        // 改姓名/班级/邮箱/昵称既不会锁死账号也不会提权，
+        // 而超管本人没法通过 /user/profile 改这些字段（那个接口只管个性属性），
+        // 拦住它反而会让超管连自己的真实姓名都改不了。
+
+        if (body == null || body.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_PARAM,
+                    "请求体为空。允许的字段：" + EDITABLE_FIELDS);
+        }
+        for (String key : body.keySet()) {
+            String hint = REDIRECTED_FIELDS.get(key);
+            if (hint != null) {
+                throw new BizException(ErrorCode.BAD_PARAM,
+                        "字段 " + key + " 不能通过本接口修改：" + hint);
+            }
+            if (!EDITABLE_FIELDS.contains(key)) {
+                throw new BizException(ErrorCode.BAD_PARAM,
+                        "不支持的字段：" + key + "。允许的字段：" + EDITABLE_FIELDS);
+            }
+        }
+
+        // 唯一性校验：只在"值真的变了"时查库，避免把自己的旧值当成冲突
+        if (body.containsKey("studentNo")) {
+            String studentNo = AccountRules.normalizeStudentNo(stringValue(body.get("studentNo")));
+            if (studentNo != null && !studentNo.equals(user.getStudentNo())) {
+                SysUser other = userMapper.selectByStudentNo(studentNo);
+                if (other != null && !other.getId().equals(id)) {
+                    throw new BizException(ErrorCode.STUDENT_NO_EXISTS,
+                            "学号 " + studentNo + " 已被账号 " + other.getUsername() + " 使用");
+                }
+            }
+            user.setStudentNo(studentNo);
+        }
+        if (body.containsKey("email")) {
+            String email = AccountRules.normalizeEmail(stringValue(body.get("email")));
+            if (email != null && !email.equals(user.getEmail())) {
+                SysUser other = userMapper.selectByEmail(email);
+                if (other != null && !other.getId().equals(id)) {
+                    throw new BizException(ErrorCode.EMAIL_REGISTERED,
+                            "邮箱已被账号 " + other.getUsername() + " 使用");
+                }
+            }
+            user.setEmail(email);
+        }
+        if (body.containsKey("realName")) {
+            user.setRealName(AccountRules.normalizeRealName(stringValue(body.get("realName"))));
+        }
+        if (body.containsKey("className")) {
+            user.setClassName(AccountRules.normalizeClassName(stringValue(body.get("className"))));
+        }
+        if (body.containsKey("nickname")) {
+            // 复用个性属性的昵称规则：为空报错，与 /user/profile 的语义保持一致
+            user.setNickname(ProfileRules.normalizeNickname(stringValue(body.get("nickname"))));
+        }
+
+        try {
+            userMapper.updateAdminProfile(id, user.getRealName(), user.getStudentNo(),
+                    user.getClassName(), user.getEmail(), user.getNickname());
+        } catch (DuplicateKeyException e) {
+            // 上面的预检查能拦住 99% 的情况，但 uk_username / uk_student_no / uk_email
+            // 这三个唯一索引**不排除逻辑删除的行**：一个已注销账号仍占着它的邮箱/学号，
+            // 而 selectByEmail/selectByStudentNo 都带 deleted = 0，查不到它。
+            // 并发下也可能两边同时通过预检查。这里兜底把数据库异常翻译成人话。
+            throw new BizException(ErrorCode.BAD_PARAM,
+                    "邮箱或学号已被占用（可能属于一个已注销的账号）");
+        }
+
+        // CachedUser 目前只含 status/role/pwdChanged，并不包含这几个资料字段；
+        // 仍然 evict 是廉价保险：以后给 CachedUser 加字段时不会漏掉失效。
+        userCache.evict(id);
+        auditService.log(loginUser.id(), "USER_PROFILE_UPDATE", "USER", String.valueOf(id),
+                clientIp, true, "fields=" + String.join(",", body.keySet()));
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     // ---------------------------------------------------------------- 内部

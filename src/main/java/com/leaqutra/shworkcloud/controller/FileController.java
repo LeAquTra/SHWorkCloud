@@ -106,9 +106,14 @@ public class FileController {
 
     // ---------------------------------------------------------------- 下载预览
 
+    /**
+     * 取 10 分钟有效的签名下载地址。
+     * <p>⚠️ 返回的是 <b>{@code { "url": "..." }}</b> 对象（不是裸字符串），
+     * 与 {@code docs/后端接口手册.md} §6 的契约一致；详见 {@link FileVo.UrlVo}。
+     */
     @GetMapping("/files/{id}/download-url")
-    public R<String> downloadUrl(@PathVariable Long id) {
-        return R.ok(fileService.downloadUrl(id));
+    public R<FileVo.UrlVo> downloadUrl(@PathVariable Long id) {
+        return R.ok(new FileVo.UrlVo(fileService.downloadUrl(id)));
     }
 
     /**
@@ -203,8 +208,12 @@ public class FileController {
         return R.ok(fileService.listImages(page, size));
     }
 
+    /**
+     * 取签名预览地址（{@code <img src>} / {@code <video src>} 可直接用，无需请求头）。
+     * <p>同样返回 <b>{@code { "url": "..." }}</b> 对象，理由见 {@link FileVo.UrlVo}。
+     */
     @GetMapping("/files/{id}/preview-url")
-    public R<String> previewUrl(@PathVariable Long id) {
-        return R.ok(fileService.previewUrl(id));
+    public R<FileVo.UrlVo> previewUrl(@PathVariable Long id) {
+        return R.ok(new FileVo.UrlVo(fileService.previewUrl(id)));
     }
 }

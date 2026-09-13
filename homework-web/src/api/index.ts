@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { get, post, put, del, getBlob } from './http'
 import type {
+  AdminUpdateProfileReq,
   AdminUserVO,
   BreadcrumbVO,
   CaptchaImageVO,
@@ -203,6 +204,15 @@ export const adminApi = {
   resetPassword: (id: number) => put<ResetPasswordVO>(`/admin/users/${id}/reset-password`),
   resetPasswordBatch: (ids: number[]) => put<number>('/admin/users/reset-password-batch', { ids }),
   recalcStorage: (id: number) => put<number>(`/admin/users/${id}/recalc-storage`),
+  /**
+   * 代改用户资料（**部分更新**：只提交要改的键，不传的键不动）。
+   *
+   * 允许的键：realName / studentNo / className / email / nickname。
+   * 传空串表示**清空**该字段（例如把学生的邮箱清掉）。
+   * 登录名/角色/状态/配额/密码/头像不能走这里，后端会返回明确提示。
+   */
+  updateProfile: (id: number, body: AdminUpdateProfileReq) =>
+    put<void>(`/admin/users/${id}`, body),
   changeRole: (id: number, role: number) => put<void>(`/admin/users/${id}/role`, { role }),
   deleteUser: (id: number, purgeFiles = false) =>
     del<void>(`/admin/users/${id}`, undefined, { purgeFiles }),

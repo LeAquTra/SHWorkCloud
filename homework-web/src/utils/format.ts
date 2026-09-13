@@ -114,8 +114,20 @@ export function fileTone(item: { folder: boolean; suffix: string | null }): File
   return 'other'
 }
 
-/** 触发浏览器下载（走已签名的 URL） */
+/**
+ * 触发浏览器下载（走已签名的 URL）。
+ *
+ * ⚠️ 这里**必须校验 url**，别删。真实踩过的坑：
+ * 后端 `download-url` 契约是 `{ url }` 对象，一旦实现成裸字符串，前端解构出的
+ * `url` 就是 `undefined`；而 `a.href = undefined` **不抛任何异常** ——
+ * DOM 会把它转成字面量字符串 `"undefined"`，浏览器按相对路径打开
+ * `https://站点/undefined`，用户只看到一个莫名其妙的「页面不存在」404，
+ * 控制台还干干净净，极难定位。所以在这里挡住，把静默失败变成明确报错。
+ */
 export function triggerDownload(url: string): void {
+  if (!url || typeof url !== 'string') {
+    throw new Error('没有拿到有效的下载地址（响应格式不正确）')
+  }
   const a = document.createElement('a')
   a.href = url
   // 后端已在签名 URL 上带 response-content-disposition，这里不再指定 download 属性

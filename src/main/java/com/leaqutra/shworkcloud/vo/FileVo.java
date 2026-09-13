@@ -56,6 +56,20 @@ public final class FileVo {
                               LocalDateTime createTime, LocalDateTime updateTime) {
     }
 
+    /**
+     * 签名地址响应：{@code download-url} 与 {@code preview-url} 统一返回
+     * <code>{ "url": "https://..." }</code>。
+     * <p>
+     * ⚠️ <b>必须是对象，不能是裸字符串。</b>这两个接口曾经直接返回 {@code R<String>}，
+     * 与文档（以及前端 `const { url } = await ...`）不一致：
+     * 前端解构出的 {@code url} 是 {@code undefined}，赋给 {@code <a href>} 后会被转成
+     * 字面量字符串 {@code "undefined"}、按相对路径解析成 {@code https://站点/undefined}，
+     * 于是新窗口打开就是 <b>404 页面不存在</b> —— 而且不报任何前端错误，极难定位。
+     * <p>回归守卫：{@code FileUrlContractTest}。
+     */
+    public record UrlVo(String url) {
+    }
+
     /** 文本/Office 正文阅览结果 */
     public record TextContentVo(Long id, String name, String suffix, String viewType, long size,
                                 String charset, String content, boolean truncated,

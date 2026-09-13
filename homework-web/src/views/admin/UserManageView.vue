@@ -70,8 +70,9 @@
         <el-table-column label="最后登录" width="170">
           <template #default="{ row }">{{ formatTime(row.lastLoginTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click="editProfile(row)">编辑资料</el-button>
             <el-button
               link
               :type="row.status === 1 ? 'danger' : 'success'"
@@ -144,6 +145,42 @@
         <el-button type="primary" @click="saveRole">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 编辑资料（部分更新：只提交填了内容的字段） -->
+    <el-dialog v-model="profileVisible" title="编辑用户资料" width="460px">
+      <el-form label-width="90px">
+        <el-form-item label="登录名">
+          <span class="muted">{{ current?.username }}（不可修改）</span>
+        </el-form-item>
+        <el-form-item label="真实姓名">
+          <el-input v-model="profileForm.realName" maxlength="50" placeholder="留空表示清空" />
+        </el-form-item>
+        <el-form-item label="学号">
+          <el-input
+            v-model="profileForm.studentNo"
+            maxlength="32"
+            placeholder="数字/字母/下划线/连字符，3~32 位"
+          />
+        </el-form-item>
+        <el-form-item label="班级">
+          <el-input v-model="profileForm.className" maxlength="100" placeholder="如 高一(3)班" />
+        </el-form-item>
+        <el-form-item label="邮箱">
+          <el-input v-model="profileForm.email" maxlength="100" placeholder="留空表示清空" />
+        </el-form-item>
+        <el-form-item label="昵称">
+          <el-input v-model="profileForm.nickname" maxlength="50" placeholder="不能为空" />
+        </el-form-item>
+      </el-form>
+      <p class="muted">
+        只有内容发生变化的字段会被提交；学号与邮箱会做唯一性校验。
+        登录名、角色、状态、配额、密码、头像请用各自的操作按钮。
+      </p>
+      <template #footer>
+        <el-button @click="profileVisible = false">取消</el-button>
+        <el-button type="primary" :loading="profileSaving" @click="saveProfile">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -153,7 +190,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '@/api'
 import { ApiError } from '@/api/http'
 import { useUserStore } from '@/stores/user'
-import { ROLE_LABELS, type AdminUserVO } from '@/types/api'
+import { ROLE_LABELS, type AdminUpdateProfileReq, type AdminUserVO } from '@/types/api'
 import { formatSize, formatTime } from '@/utils/format'
 
 const user = useUserStore()
@@ -178,6 +215,18 @@ const quotaVisible = ref(false)
 const quotaGb = ref(1)
 const roleVisible = ref(false)
 const newRole = ref(0)
+
+// —— 编辑资料 ——
+const profileVisible = ref(false)
+const profileSaving = ref(false)
+/** 编辑中的表单快照（字符串，null 归一成空串以便输入框显示与比较） */
+const profileForm = reactive({
+  realName: '',
+  studentNo: '',
+  className: '',
+  email: '',
+  nickname: '',
+})
 
 async function reload(toPage?: number) {
   if (toPage) {
@@ -253,6 +302,60 @@ async function saveQuota() {
     await reload()
   } catch (error) {
     ElMessage.error(error instanceof ApiError ? error.message : '保存失败')
+  }
+}
+
+// ---------------------------------------------------------------- 编辑资料
+
+function editProfile(row: AdminUserVO) {
+  current.value = row
+  // null 归一成空串，输入框才能正常显示与比较
+  profileForm.realName = row.realName ?? ''
+  profileForm.studentNo = row.studentNo ?? ''
+  profileForm.className = row.className ?? ''
+  profileForm.email = row.email ?? ''
+  profileForm.nickname = row.nickname ?? ''
+  profileVisible.value = true
+}
+
+async function saveProfile() {
+  const row = current.value
+  if (!row) {
+    return
+  }
+  // ⚠️ 关键：只把"真的改了"的字段放进请求体。
+  // 后端是部分更新语义 —— 不传的键不动，而传空串表示清空。
+  // 如果把整个表单都提交上去，没动过的字段也会被当成"改成当前值"，虽然结果相同，
+  // 但一旦某次把空串误当成"值"提交，就会把学生的邮箱/学号清掉。
+  const body: AdminUpdateProfileReq = {}
+  const put = (key: keyof AdminUpdateProfileReq, next: string, original: string | null) => {
+    const value = next.trim()
+    if (value !== (original ?? '')) {
+      body[key] = value
+    }
+  }
+  put('realName', profileForm.realName, row.realName)
+  put('studentNo', profileForm.studentNo, row.studentNo)
+  put('className', profileForm.className, row.className)
+  put('email', profileForm.email, row.email)
+  put('nickname', profileForm.nickname, row.nickname)
+
+  if (Object.keys(body).length === 0) {
+    profileVisible.value = false
+    ElMessage.info('没有检测到改动')
+    return
+  }
+
+  profileSaving.value = true
+  try {
+    await adminApi.updateProfile(row.id, body)
+    profileVisible.value = false
+    ElMessage.success('资料已更新')
+    await reload()
+  } catch (error) {
+    ElMessage.error(error instanceof ApiError ? error.message : '保存失败')
+  } finally {
+    profileSaving.value = false
   }
 }
 

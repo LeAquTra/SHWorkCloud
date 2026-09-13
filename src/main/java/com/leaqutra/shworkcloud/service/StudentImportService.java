@@ -39,7 +39,8 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class StudentImportService {
 
-    private static final Pattern STUDENT_NO = Pattern.compile("^[A-Za-z0-9_-]{3,32}$");
+    /** 学号格式：统一由 {@link AccountRules} 定义，避免与后台代改资料两处不一致 */
+    private static final Pattern STUDENT_NO = AccountRules.STUDENT_NO;
 
     /** 表头别名，兼容中英文与常见写法 */
     private static final Map<String, String> HEADER_ALIAS = new HashMap<>();

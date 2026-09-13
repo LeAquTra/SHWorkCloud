@@ -164,7 +164,7 @@
 
 ## 0.6 实现状态与已知差异
 
-> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（126 个用例，1 个跳过）均通过。
+> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（142 个用例，1 个跳过）均通过。
 > 下列偏差由**本机离线环境**（本地 Maven 仓库缺少部分 artifact）导致，已在代码注释中标注，
 > 完整说明见 `README.md` §7。
 
@@ -186,6 +186,9 @@
 | 下载回本地 | 只有签名 URL | 增加 **`GET /files/{id}/download`** 服务端流式下载（支持 `Range`） | 调用方只连业务服务器即可下载，且可断点续传 |
 | 前端 | 文档要求交付 Vue 前端 | **不交付前端**，仅提供 REST 接口 | 需求方只负责后端；前端章节降级为参考实现 |
 | OSS `Content-Type` 签名 | 未说明 | `/oss/put-url` 与 `/oss/multipart/part-urls` 返回签名时用的 `contentType`，客户端必须原样发送 | OSS V1 签名把 Content-Type 计入待签字符串，不一致会 SignatureDoesNotMatch |
+| **OSS 客户端强制 HTTPS** | 未说明 | `OssClientConfig` 用 `ClientBuilderConfiguration.setProtocol(Protocol.HTTPS)` 显式指定 https，并把 endpoint 的协议前缀与结尾斜杠规范化掉 | 🔴 **真实故障**：`aliyun-sdk-oss` 的 `ClientConfiguration` 默认 `Protocol.HTTP`，于是 `generatePresignedUrl` 签出来的直传地址是 `http://`；前端部署在 https 页面后，浏览器以**混合内容（Mixed Content）**为由直接拦掉 XHR，前端只报"网络错误，上传中断"、OSS 侧只看到失败请求，两头都像"网络问题"。同时服务端自身调 OSS 也会走明文。回归守卫：`OssClientHttpsTest` |
+| **注册登录名字符集** | 未说明 | `AccountRules` 强制 `^[0-9A-Za-z]+$`、≤20 字符；非法输入<b>直接报错</b>，不再静默改写 | 原实现是 `replaceAll("[^A-Za-z0-9_]","")` 静默抹字符：填「张三」被抹成空串 → 退化成 `u12345`，用户以为注册成功却登不上（找不到账号）。同时把「仅数字与大小写字母」定为不变量：邮箱派生路径的清洗也去掉下划线，保证落库登录名一律满足该模式 |
+| **后台代改用户资料** | 后台只有状态/配额/密码/角色/删除 | 新增 `PUT /admin/users/{id}`（仅超管），可改 `realName`/`studentNo`/`className`/`email`/`nickname`；**部分更新**语义；学号与邮箱做唯一性校验 | 名单导入只能建号不能改错别字；学号同时是登录名（`selectByLogin` 匹配 username 或 student_no），撞车会让人登到错误账号，必须唯一 |
 | **自定义头像** | 文档只有 `avatar` 文本字段（用户填 URL） | 改为**服务端上传到 OSS**（`avatar/{userId}/{uuid}.{ext}`），DB 只存 `avatar_key` | 需求：仅 JPG/PNG、≤5MB、存 OSS；换头像要能定位并删除旧对象，填 URL 做不到 |
 | **删除即清 OSS** | 只有彻底删除才删 OSS | 新增 `app.recycle.enabled=false` 时「删除即彻底删除」；删除用户/头像/题目也同步删 OSS | 需求：保证 OSS 容器整洁 |
 | **OSS 对账** | 无 | 新增 `OssReconcileService` + 每日任务，扫 `homework/`、`avatar/`、`captcha/` 三个前缀清理无引用对象（24 小时宽限） | 远程删除可能失败、进程可能被强杀，必须有兜底才谈得上"整洁" |

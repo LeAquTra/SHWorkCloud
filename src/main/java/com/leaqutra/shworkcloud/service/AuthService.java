@@ -162,7 +162,9 @@ public class AuthService {
         }
         emailCodeService.verifyAndConsume(email, req.emailCode());
 
-        String username = resolveUsername(email, req.username());
+        // 用户自填的登录名必须严格合法：只允许数字与大小写字母。
+        // 不合法直接报错，绝不静默改写 —— 否则用户以为注册成功、实际登录名已被换掉。
+        String username = resolveUsername(email, AccountRules.optionalUsername(req.username()));
         PasswordValidator.validate(req.password(), username);
 
         SysUser user = new SysUser();
@@ -184,15 +186,23 @@ public class AuthService {
                 String.valueOf(user.getId()), clientIp, true, "self-register");
     }
 
-    /** 默认用 QQ 号做登录名；冲突时追加序号 */
+    /**
+     * 取登录名：优先用用户填的，留空则用邮箱 @ 前面的部分；冲突时追加序号。
+     * <p>
+     * {@code preferred} 已经过 {@link AccountRules#optionalUsername} 严格校验
+     * （只允许数字与大小写字母，非法直接抛错）。下面的 {@code replaceAll} 是给
+     * <b>邮箱派生</b>那条路径兜底的清洗，不是主要校验手段。
+     */
     private String resolveUsername(String email, String preferred) {
         String base = StringUtils.hasText(preferred) ? preferred.trim() : email.substring(0, email.indexOf('@'));
-        base = base.replaceAll("[^A-Za-z0-9_]", "");
+        // 与 AccountRules.USERNAME_PATTERN 保持同一个字符集：
+        // 这样「无论走哪条路径，落库的登录名都满足 ^[0-9A-Za-z]+$」这个不变量
+        base = base.replaceAll("[^A-Za-z0-9]", "");
         if (base.isEmpty()) {
             base = "u" + System.currentTimeMillis() % 100000;
         }
-        if (base.length() > 40) {
-            base = base.substring(0, 40);
+        if (base.length() > AccountRules.USERNAME_MAX) {
+            base = base.substring(0, AccountRules.USERNAME_MAX);
         }
         if (userMapper.selectByLogin(base) == null) {
             return base;

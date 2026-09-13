@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 后台用户管理。
@@ -83,6 +84,27 @@ public class AdminUserController {
     @PutMapping("/{id}/recalc-storage")
     public R<Long> recalcStorage(@PathVariable Long id, HttpServletRequest request) {
         return R.ok(adminUserService.recalcStorage(id, clientIpUtil.get(request)));
+    }
+
+    /**
+     * 代改用户资料（<b>部分更新</b>）。
+     * <p>
+     * 允许的键：{@code realName} / {@code studentNo} / {@code className} / {@code email} / {@code nickname}。
+     * <ul>
+     *   <li><b>不传的键不改动</b>；传空串表示<b>清空</b>该字段；</li>
+     *   <li>学号与邮箱会做唯一性校验（学号同时是登录名，撞车会让人登错账号）；</li>
+     *   <li>登录名 / 角色 / 状态 / 配额 / 密码 / 头像不能走这里，会返回明确提示。</li>
+     * </ul>
+     * <p>仅超管可调用；注意路由 {@code /{id}} 与 {@code /reset-password-batch} 不冲突
+     * （Spring 会优先匹配字面量路径）。
+     */
+    @SaCheckRole("super_admin")
+    @PutMapping("/{id}")
+    public R<Void> updateProfile(@PathVariable Long id,
+                                 @RequestBody Map<String, Object> body,
+                                 HttpServletRequest request) {
+        adminUserService.updateProfile(id, body, clientIpUtil.get(request));
+        return R.ok();
     }
 
     /** 任命/撤销管理员或教师：仅超管 */

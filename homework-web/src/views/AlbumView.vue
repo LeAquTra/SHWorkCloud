@@ -85,7 +85,7 @@ import PreviewDialog from '@/components/PreviewDialog.vue'
 import { fileApi, imageApi } from '@/api'
 import { ApiError } from '@/api/http'
 import type { FileItemVO, ImageItemVO } from '@/types/api'
-import { formatSize } from '@/utils/format'
+import { formatSize, triggerDownload } from '@/utils/format'
 
 /**
  * 相册页。
@@ -155,14 +155,9 @@ async function jumpToFolder(image: ImageItemVO) {
 
 async function download(image: ImageItemVO) {
   try {
+    // 走共用的 triggerDownload：那里带响应格式防呆（详见 utils/format.ts 的注释）
     const { url } = await fileApi.downloadUrl(image.id)
-    const a = document.createElement('a')
-    a.href = url
-    a.rel = 'noopener'
-    a.target = '_blank'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    triggerDownload(url)
   } catch (error) {
     ElMessage.error(error instanceof ApiError ? error.message : '获取下载地址失败')
   }

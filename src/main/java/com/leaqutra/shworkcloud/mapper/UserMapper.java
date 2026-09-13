@@ -24,6 +24,10 @@ public interface UserMapper extends BaseMapper<SysUser> {
     @Select("SELECT * FROM sys_user WHERE deleted = 0 AND email = #{email} LIMIT 1")
     SysUser selectByEmail(@Param("email") String email);
 
+    /** 学号唯一性校验用（学号同时也是登录名，不能撞车） */
+    @Select("SELECT * FROM sys_user WHERE deleted = 0 AND student_no = #{studentNo} LIMIT 1")
+    SysUser selectByStudentNo(@Param("studentNo") String studentNo);
+
     @Select("SELECT COUNT(*) FROM sys_user WHERE role = 9 AND deleted = 0")
     long countSuperAdmin();
 
@@ -107,4 +111,22 @@ public interface UserMapper extends BaseMapper<SysUser> {
                       @Param("signature") String signature,
                       @Param("gender") Byte gender,
                       @Param("birthday") LocalDate birthday);
+
+    /**
+     * 后台代改身份资料。
+     * <p>同样刻意只列这几列，不用 {@code updateById}：后者会把整行（含密码）写回。
+     * <p>调用方需先把「未提交的字段」用当前值填好再传入，实现部分更新。
+     */
+    @Update("""
+            UPDATE sys_user
+            SET real_name = #{realName}, student_no = #{studentNo}, class_name = #{className},
+                email = #{email}, nickname = #{nickname}
+            WHERE id = #{id} AND deleted = 0
+            """)
+    int updateAdminProfile(@Param("id") Long id,
+                           @Param("realName") String realName,
+                           @Param("studentNo") String studentNo,
+                           @Param("className") String className,
+                           @Param("email") String email,
+                           @Param("nickname") String nickname);
 }

@@ -121,7 +121,12 @@
       </el-form-item>
 
       <el-form-item label="登录名（可选）" prop="username">
-        <el-input v-model="form.username" size="large" placeholder="留空则默认取邮箱 @ 前面的部分" />
+        <el-input
+          v-model="form.username"
+          size="large"
+          maxlength="20"
+          placeholder="只能数字或字母；留空则取邮箱 @ 前面的部分"
+        />
       </el-form-item>
 
       <el-button type="primary" size="large" class="submit" :loading="submitting" @click="submit">
@@ -247,6 +252,30 @@ const rules: FormRules = {
       validator: (_rule, value: string, callback) => {
         if (value !== form.password) {
           callback(new Error('两次输入的密码不一致'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur',
+    },
+  ],
+  // 登录名是可选字段：留空则服务端按邮箱 @ 前面的部分生成，所以空值要放行。
+  // 规则与后端 AccountRules.USERNAME_PATTERN 保持一致：
+  // ⚠️ 前端校验只是"提前告知"，真正的把关在后端（后端不合法会直接报错，不做静默改写）。
+  username: [
+    {
+      validator: (_rule, value: string, callback) => {
+        const name = (value ?? '').trim()
+        if (!name) {
+          callback()
+          return
+        }
+        if (!/^[0-9A-Za-z]+$/.test(name)) {
+          callback(new Error('登录名只能使用数字或大小写字母'))
+          return
+        }
+        if (name.length > 20) {
+          callback(new Error('登录名最多 20 个字符'))
           return
         }
         callback()
