@@ -164,7 +164,7 @@
 
 ## 0.6 实现状态与已知差异
 
-> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（120 个用例，1 个跳过）均通过。
+> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（126 个用例，1 个跳过）均通过。
 > 下列偏差由**本机离线环境**（本地 Maven 仓库缺少部分 artifact）导致，已在代码注释中标注，
 > 完整说明见 `README.md` §7。
 
@@ -172,6 +172,7 @@
 |----|----------|----------|-----------|
 | STS 调用 | `aliyun-java-sdk-sts` 的 `AssumeRoleRequest` | `aliyun-java-sdk-core` 的 `CommonRequest` 通用 RPC 调用 STS（`Sts/2015-04-01/AssumeRole`） | 本地无 `aliyun-java-sdk-sts`。补上依赖后可换回 `AssumeRoleRequest`，效果等价 |
 | 会话存储 | `sa-token-redis-jackson` | Sa-Token 默认内存 DAO | 本地无该 artifact。**多实例部署前必须补上**，否则重启即全员掉线 |
+| **排除 `sa-token-jackson`** | 未提及 | pom 里 `exclude` 掉 Sa-Token starter 传递来的 `sa-token-jackson`，并自建 `SaTokenJsonConfig` 注入**基于 Jackson 3** 的 `SaJsonTemplate` | 🔴 **真实故障**：Sa-Token 1.45 会扫描所有 jar 的 `META-INF/satoken/` 并立即 install 插件，`sa-token-jackson` 的 `install()` 引用 **Jackson 2** 的 `PolymorphicTypeValidator`；Boot 4 只有 **Jackson 3**（`tools.jackson`）→ `NoClassDefFoundError` → `SaBeanInject` 构造失败 → **应用启动即崩、systemd 无限重启**。Sa-Token 对插件异常是 fail-fast（不跳过坏插件），只能排除依赖。回归守卫见 `SaTokenStackTest` |
 | 参数校验 | `spring-boot-starter-validation` 注解 | Service 层手写校验 + `PasswordValidator` | 本地无 hibernate-validator |
 | 密码哈希 | Spring Security `BCryptPasswordEncoder` | Hutool `BCrypt`（同为 `$2a$10$` 格式，**互相兼容**，无需迁移） | 本地无 spring-security-crypto |
 | 签名响应头 | `ResponseHeaderParameters` | `ResponseHeaderOverrides` | 🔴 文档原类名在 OSS SDK 3.17.4 中**不存在**，§6.5.7 已修正 |

@@ -32,6 +32,7 @@ public class SaTokenConfigure implements WebMvcConfigurer {
     /** 无需登录即可访问的路径 */
     private static final String[] PUBLIC_PATHS = {
             "/auth/login",
+            "/auth/register-config",       // 登录页要在“还没有 token”时就知道注册开没开，必须公开
             "/auth/captcha",
             "/auth/captcha/verify",
             "/auth/email-code",

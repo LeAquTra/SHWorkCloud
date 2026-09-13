@@ -91,7 +91,7 @@ mvn spring-boot:run
 ### 3.1 已验证可用的命令
 
 ```bash
-mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 108 个单元测试
+mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 126 个单元测试
 mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository compile
 ```
 
@@ -275,6 +275,7 @@ SHWorkCloud/
 | **自定义头像** | `avatar` 是文本 URL 字段 | 改为服务端上传 OSS，DB 存 `avatar_key` | 需求：仅 JPG/PNG、≤5MB、存 OSS；且换头像要能删掉旧对象 |
 | **删除即清 OSS** | 仅彻底删除才删 OSS | `app.recycle.enabled=false` 时删除即彻底删除；删用户/头像/题目也删 OSS | 需求：保证 OSS 容器整洁 |
 | **OSS 对账** | 无 | 每日扫 `homework/`、`avatar/`、`captcha/` 清理无引用对象（24h 宽限） | 远程删除可能失败，需要兜底 |
+| **排除 `sa-token-jackson`** | 未提及 | pom 里 `exclude` 掉 Sa-Token 带来的 `sa-token-jackson`，并自建 `SaTokenJsonConfig` 注入基于 **Jackson 3** 的 `SaJsonTemplate` | 🔴 **真实故障**：Sa-Token 1.45 会扫描所有 jar 的 `META-INF/satoken/` 并立即 install 插件，`sa-token-jackson` 的 `install()` 引用 **Jackson 2** 的 `PolymorphicTypeValidator`，而 Boot 4 只有 **Jackson 3**（`tools.jackson`）→ `NoClassDefFoundError` → **应用启动即崩、systemd 无限重启**。Sa-Token 对插件异常 fail-fast，不跳过坏插件，只能排除依赖。回归守卫：`SaTokenStackTest` |
 
 ---
 

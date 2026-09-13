@@ -1,5 +1,7 @@
 /** 展示格式化工具 */
 
+import type { FileItemVO, ViewType } from '@/types/api'
+
 export function formatSize(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || bytes < 0) {
     return '-'
@@ -21,26 +23,95 @@ export function formatTime(value: string | null | undefined): string {
   return value.replace('T', ' ')
 }
 
+/** 只保留日期部分，用于"最后登录"这类窄列 */
+export function formatDate(value: string | null | undefined): string {
+  if (!value) {
+    return '-'
+  }
+  return value.replace('T', ' ').slice(0, 10)
+}
+
 export function formatPercent(value: number): string {
   return `${Math.max(0, Math.min(100, Math.round(value)))}%`
 }
 
-/** 文件类型图标（用 emoji 避免额外引入图标包） */
-export function fileIcon(item: { folder: boolean; suffix: string | null }): string {
-  if (item.folder) {
-    return '📁'
+export function bytesToGb(bytes: number): number {
+  return Math.round((bytes / 1024 / 1024 / 1024) * 10) / 10
+}
+
+export function gbToBytes(gb: number): number {
+  return Math.round(gb * 1024 * 1024 * 1024)
+}
+
+// ---------------------------------------------------------------- viewType
+
+const IMAGE_SUFFIX = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
+const VIDEO_SUFFIX = ['mp4', 'webm', 'mov', 'mkv', 'avi', 'wmv', 'flv', 'm4v']
+const AUDIO_SUFFIX = ['mp3', 'wav', 'm4a', 'flac', 'aac', 'ogg', 'wma']
+const TEXT_SUFFIX = ['txt', 'md', 'csv', 'json', 'log', 'xml', 'yml', 'yaml', 'ini', 'java', 'ts', 'js', 'py', 'c', 'cpp', 'html', 'css', 'sql']
+const OFFICE_SUFFIX = ['doc', 'docx', 'pptx']
+
+/**
+ * 该用哪种方式渲染这个文件。
+ *
+ * <p>**以服务端下发的 viewType 为准**（接口手册 §0.4：前端不要自己维护一份
+ * 后缀白名单，两边各写一份迟早不一致）。下面的后缀推断只是兜底：万一后端
+ * 某个接口没带 viewType，界面至少不会退化成"全部只能下载"。
+ */
+export function resolveViewType(item: Pick<FileItemVO, 'viewType' | 'suffix' | 'contentType'>): ViewType {
+  if (item.viewType) {
+    return item.viewType
   }
   const suffix = (item.suffix || '').toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(suffix)) return '🖼'
-  if (['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm'].includes(suffix)) return '🎬'
-  if (['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'].includes(suffix)) return '🎵'
-  if (suffix === 'pdf') return '📕'
-  if (['doc', 'docx'].includes(suffix)) return '📘'
-  if (['xls', 'xlsx', 'csv'].includes(suffix)) return '📗'
-  if (['ppt', 'pptx'].includes(suffix)) return '📙'
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(suffix)) return '🗜'
-  if (['txt', 'md'].includes(suffix)) return '📄'
-  return '📎'
+  if (IMAGE_SUFFIX.includes(suffix)) return 'image'
+  if (suffix === 'pdf') return 'pdf'
+  if (VIDEO_SUFFIX.includes(suffix)) return 'video'
+  if (AUDIO_SUFFIX.includes(suffix)) return 'audio'
+  if (TEXT_SUFFIX.includes(suffix)) return 'text'
+  if (OFFICE_SUFFIX.includes(suffix)) return 'office'
+  return 'none'
+}
+
+/** 能否在线阅览（有内容可看，而不是只能下载） */
+export function canPreview(item: FileItemVO): boolean {
+  if (item.folder) {
+    return false
+  }
+  // 后端若明确给了 previewable 就听它的
+  if (typeof item.previewable === 'boolean') {
+    return item.previewable
+  }
+  return resolveViewType(item) !== 'none'
+}
+
+export const VIEW_TYPE_LABELS: Record<ViewType, string> = {
+  image: '图片',
+  pdf: 'PDF',
+  video: '视频',
+  audio: '音频',
+  text: '文本',
+  office: 'Office 文档',
+  none: '仅可下载',
+}
+
+// ---------------------------------------------------------------- 图标
+
+export type FileTone = 'folder' | 'image' | 'video' | 'audio' | 'pdf' | 'doc' | 'sheet' | 'slide' | 'archive' | 'text' | 'other'
+
+/** 与 FileGlyph.vue 的配色表对应；在这里归类，方便列表与相册复用同一套视觉 */
+export function fileTone(item: { folder: boolean; suffix: string | null }): FileTone {
+  if (item.folder) return 'folder'
+  const suffix = (item.suffix || '').toLowerCase()
+  if (IMAGE_SUFFIX.includes(suffix)) return 'image'
+  if (VIDEO_SUFFIX.includes(suffix)) return 'video'
+  if (AUDIO_SUFFIX.includes(suffix)) return 'audio'
+  if (suffix === 'pdf') return 'pdf'
+  if (['doc', 'docx'].includes(suffix)) return 'doc'
+  if (['xls', 'xlsx', 'csv'].includes(suffix)) return 'sheet'
+  if (['ppt', 'pptx'].includes(suffix)) return 'slide'
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(suffix)) return 'archive'
+  if (TEXT_SUFFIX.includes(suffix)) return 'text'
+  return 'other'
 }
 
 /** 触发浏览器下载（走已签名的 URL） */
@@ -58,4 +129,25 @@ export function triggerDownload(url: string): void {
 /** 生成简短随机 id（不依赖 Web Crypto，内网 http 下 crypto.randomUUID 不存在） */
 export function randomId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
+}
+
+/** 复制文本：非安全上下文下 navigator.clipboard 不可用，降级到 execCommand */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+    const input = document.createElement('textarea')
+    input.value = text
+    input.style.position = 'fixed'
+    input.style.opacity = '0'
+    document.body.appendChild(input)
+    input.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(input)
+    return ok
+  } catch {
+    return false
+  }
 }

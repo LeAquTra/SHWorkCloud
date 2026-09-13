@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { ROLE_ADMIN, ROLE_SUPER_ADMIN, ROLE_TEACHER } from '@/types/api'
+import { ADMIN_ROLES, STAFF_ROLES, SUPER_ADMIN_ROLES } from '@/types/api'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -10,6 +10,7 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true, title: '登录' },
   },
   {
+    // 首登强制改密是一个"必须专心做完"的动作，所以不进主壳，单独整屏呈现
     path: '/change-password',
     name: 'change-password',
     component: () => import('@/views/ChangePasswordView.vue'),
@@ -17,39 +18,65 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    name: 'files',
-    component: () => import('@/views/FileManagerView.vue'),
-    meta: { title: '我的网盘' },
+    component: () => import('@/layouts/UserLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'files',
+        component: () => import('@/views/FileManagerView.vue'),
+        meta: { title: '我的网盘' },
+      },
+      {
+        // 回收站与文件列表是同一个视图的两种模式，用独立路由是为了让顶栏导航能高亮
+        path: 'recycle',
+        name: 'recycle',
+        component: () => import('@/views/FileManagerView.vue'),
+        props: { initialMode: 'recycle' },
+        meta: { title: '回收站' },
+      },
+      {
+        path: 'album',
+        name: 'album',
+        component: () => import('@/views/AlbumView.vue'),
+        meta: { title: '我的相册' },
+      },
+      {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/views/ProfileView.vue'),
+        meta: { title: '个人信息' },
+      },
+    ],
   },
   {
     path: '/admin',
     component: () => import('@/views/admin/AdminLayout.vue'),
-    meta: { minRole: ROLE_TEACHER },
+    meta: { roles: STAFF_ROLES },
     children: [
       { path: '', redirect: '/admin/users' },
       {
         path: 'users',
         name: 'admin-users',
         component: () => import('@/views/admin/UserManageView.vue'),
-        meta: { minRole: ROLE_ADMIN, title: '用户管理' },
+        meta: { roles: ADMIN_ROLES, title: '用户管理' },
       },
       {
         path: 'import',
         name: 'admin-import',
         component: () => import('@/views/admin/StudentImportView.vue'),
-        meta: { minRole: ROLE_TEACHER, title: '名单导入' },
+        meta: { roles: STAFF_ROLES, title: '名单导入' },
       },
       {
         path: 'captchas',
         name: 'admin-captchas',
         component: () => import('@/views/admin/CaptchaManageView.vue'),
-        meta: { minRole: ROLE_ADMIN, title: '验证码题库' },
+        meta: { roles: ADMIN_ROLES, title: '验证码题库' },
       },
       {
         path: 'ops',
         name: 'admin-ops',
         component: () => import('@/views/admin/OpsView.vue'),
-        meta: { minRole: ROLE_SUPER_ADMIN, title: '运维' },
+        meta: { roles: SUPER_ADMIN_ROLES, title: '运维' },
       },
     ],
   },
@@ -96,8 +123,8 @@ router.beforeEach(async (to) => {
   }
 
   // 角色门槛（前端只做体验控制，真正的鉴权在后端）
-  const minRole = to.meta.minRole as number | undefined
-  if (minRole !== undefined && user.role < minRole) {
+  const roles = to.meta.roles as number[] | undefined
+  if (roles && !roles.includes(user.role)) {
     return { path: '/403' }
   }
 

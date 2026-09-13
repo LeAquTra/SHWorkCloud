@@ -2,7 +2,7 @@ spring:
   application:
     name: SHWorkCloud
   profiles:
-    active: ${SPRING_PROFILES_ACTIVE:local}
+    active: ${SPRING_PROFILES_ACTIVE:prod}
 
   # ---------- 数据源 ----------
   datasource:

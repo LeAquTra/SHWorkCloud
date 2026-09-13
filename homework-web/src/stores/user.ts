@@ -1,7 +1,12 @@
 import { defineStore } from 'pinia'
 import { authApi, userApi } from '@/api'
 import { clearToken, getToken, setToken } from '@/api/http'
-import { ROLE_ADMIN, ROLE_SUPER_ADMIN, ROLE_TEACHER, type UserProfileVO } from '@/types/api'
+import {
+  ADMIN_ROLES,
+  ROLE_SUPER_ADMIN,
+  STAFF_ROLES,
+  type UserProfileVO,
+} from '@/types/api'
 
 const USER_KEY = 'sc_user'
 
@@ -32,10 +37,9 @@ export const useUserStore = defineStore('user', {
 
   getters: {
     isLoggedIn: (state) => !!state.token,
-    /** 能进后台（教师及以上） */
-    canEnterAdmin: (state) =>
-      state.role === ROLE_TEACHER || state.role === ROLE_ADMIN || state.role === ROLE_SUPER_ADMIN,
-    isAdmin: (state) => state.role === ROLE_ADMIN || state.role === ROLE_SUPER_ADMIN,
+    /** 能进后台（教师及以上）。角色编号不是有序等级，只能按集合判断 */
+    canEnterAdmin: (state) => STAFF_ROLES.includes(state.role),
+    isAdmin: (state) => ADMIN_ROLES.includes(state.role),
     isSuperAdmin: (state) => state.role === ROLE_SUPER_ADMIN,
     displayName: (state) => state.realName || state.username || '未登录',
   },
@@ -134,7 +138,13 @@ export const useUserStore = defineStore('user', {
       this.profile = null
       clearToken()
       sessionStorage.clear()
-      localStorage.clear()
+      // 只删本应用的键：
+      //  - sc_ckpt:* 是上传断点，换人上机不该看到上一位的续传任务；
+      //  - sc_theme 是这台机器的显示偏好，不是敏感信息，留着重启后更顺手
+      //    （整块 localStorage.clear() 会把它一起清掉）。
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith('sc_ckpt') || key.startsWith('sc_user'))
+        .forEach((key) => localStorage.removeItem(key))
     },
   },
 })

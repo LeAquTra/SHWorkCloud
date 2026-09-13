@@ -17,6 +17,9 @@ export interface PageVO<T> {
   records: T[]
 }
 
+/** 后端下发的渲染类型，见接口手册 §0.4 */
+export type ViewType = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'office' | 'none'
+
 // ---------------------------------------------------------------- 认证
 
 export interface LoginVO {
@@ -28,6 +31,28 @@ export interface LoginVO {
   role: number
   mustChangePassword: boolean
 }
+
+/** `GET /auth/register-config`：决定登录页要不要显示注册入口、要不要图片验证码 */
+export interface RegisterConfigVO {
+  registerEnabled: boolean
+  requireImageCaptcha: boolean
+  mailEnabled: boolean
+  /** 后端的 Java 正则，前端拿来做即时校验；用 try/catch 包住，避免个别语法不兼容 */
+  emailPattern: string
+  mailHint: string | null
+}
+
+export interface CaptchaVO {
+  captchaId: string
+  /** 1 字符输入 / 2 单选 / 3 点选 */
+  type: number
+  imageUrl: string
+  width: number
+  height: number
+  prompts: string[]
+}
+
+// ---------------------------------------------------------------- 用户
 
 export interface UserProfileVO {
   userId: number
@@ -62,6 +87,14 @@ export interface QuotaVO {
   recycleUsed: number
 }
 
+/** 部分更新个性属性：不传的键不会被改动，传 null 表示清空 */
+export interface ProfileUpdateVO {
+  nickname?: string
+  signature?: string | null
+  gender?: number | null
+  birthday?: string | null
+}
+
 // ---------------------------------------------------------------- 文件
 
 export interface FileItemVO {
@@ -72,9 +105,12 @@ export interface FileItemVO {
   size: number
   suffix: string | null
   contentType: string | null
+  parentId?: number
+  /** 决定用哪种方式渲染，**优先用它**，不要自己维护后缀白名单 */
+  viewType?: ViewType
+  previewable?: boolean
   createTime: string
   updateTime: string
-  previewable: boolean
 }
 
 export interface FolderNodeVO {
@@ -86,6 +122,43 @@ export interface FolderNodeVO {
 export interface BreadcrumbVO {
   id: number
   name: string
+}
+
+/** 签名地址类响应：download-url / preview-url 都返回 { url } */
+export interface UrlVO {
+  url: string
+}
+
+/** `GET /files/{id}/text`：文本 / Office 正文 */
+export interface TextContentVO {
+  id: number
+  name: string
+  suffix: string | null
+  viewType: ViewType
+  size: number
+  /** 服务端实际使用的编码（UTF-8 / GBK），用于提示而不是用来解码 */
+  charset: string | null
+  content: string
+  /** true 表示超过 maxChars 已截断，界面要提示下载查看完整文件 */
+  truncated: boolean
+  maxChars: number
+  hint: string | null
+}
+
+/** `GET /images`：相册项，已带 1 小时签名地址 */
+export interface ImageItemVO {
+  id: number
+  name: string
+  suffix: string | null
+  size: number
+  parentId: number
+  viewType: ViewType
+  /** 1 小时签名地址，可直接给 <img src> */
+  previewUrl: string
+  /** 需要自行带 Authorization 头时的流式地址 */
+  previewApiUrl: string
+  createTime: string
+  updateTime: string
 }
 
 // ---------------------------------------------------------------- 上传
@@ -225,4 +298,21 @@ export const ROLE_LABELS: Record<number, string> = {
   [ROLE_TEACHER]: '教师',
   [ROLE_ADMIN]: '管理员',
   [ROLE_SUPER_ADMIN]: '超级管理员',
+}
+
+/**
+ * 角色集合。
+ *
+ * ⚠️ 后端的角色编号**不是有序等级**：0 学生 / 1 管理员 / 2 教师 / 9 超管。
+ * 管理员(1) 的数值比教师(2) 小，却拥有更多权限。所以判断"能不能进"
+ * 必须用集合包含，而不是 `role >= minRole` 这种大小比较。
+ */
+export const STAFF_ROLES: number[] = [ROLE_TEACHER, ROLE_ADMIN, ROLE_SUPER_ADMIN]
+export const ADMIN_ROLES: number[] = [ROLE_ADMIN, ROLE_SUPER_ADMIN]
+export const SUPER_ADMIN_ROLES: number[] = [ROLE_SUPER_ADMIN]
+
+export const GENDER_LABELS: Record<number, string> = {
+  0: '未设置',
+  1: '男',
+  2: '女',
 }

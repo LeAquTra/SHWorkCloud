@@ -297,12 +297,12 @@ onMounted(reload)
 
 .file-name {
   margin-left: 12px;
-  color: #606266;
+  color: var(--sc-text-2);
 }
 
 .hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--sc-text-3);
   line-height: 1.5;
 }
 

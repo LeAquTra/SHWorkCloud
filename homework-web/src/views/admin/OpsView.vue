@@ -238,13 +238,13 @@ onMounted(async () => {
 .inner-net {
   margin-top: 12px;
   font-size: 12px;
-  color: #606266;
+  color: var(--sc-text-2);
 }
 
 .inner-net code {
-  background: #f5f7fa;
+  background: var(--sc-surface-2);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: var(--sc-radius-xs);
 }
 
 .op {
@@ -261,7 +261,7 @@ onMounted(async () => {
 .op-desc p {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #909399;
+  color: var(--sc-text-3);
 }
 
 .op-action {

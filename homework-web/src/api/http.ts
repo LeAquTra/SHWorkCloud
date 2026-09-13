@@ -17,12 +17,22 @@ export const CODE = {
   OK: 0,
   BAD_PARAM: 40000,
   QUOTA_EXCEEDED: 40010,
+  DUPLICATE_NAME: 40020,
   UPLOAD_TOKEN_INVALID: 40061,
   FILE_NOT_FOUND: 40070,
+  /** 对 text / office / none 类型调流式预览时的返回码 */
+  NOT_PREVIEWABLE: 40073,
+  /** 单文件超限；头像、文本阅览超限也是它 */
+  FILE_TOO_LARGE: 40082,
   UNAUTHORIZED: 40100,
+  CAPTCHA_POOL_EMPTY: 40104,
+  TOO_FREQUENT: 40113,
+  QUOTA_LIMITED: 40114,
+  LOGIN_FAILED: 40116,
   ACCOUNT_DISABLED: 40117,
   ACCOUNT_LOCKED: 40118,
   MUST_CHANGE_PASSWORD: 40119,
+  STUDENT_EXISTS: 40121,
   REGISTER_DISABLED: 40122,
   FORBIDDEN: 40300,
 } as const
@@ -69,12 +79,21 @@ function redirectToLogin(): void {
   }
 }
 
+/** 无权限：跳 403 页，而不是只弹一个 toast */
+function redirectToForbidden(): void {
+  if (!location.pathname.startsWith('/403')) {
+    location.assign('/403')
+  }
+}
+
 instance.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status
     if (status === 401) {
       redirectToLogin()
+    } else if (status === 403) {
+      redirectToForbidden()
     }
     return Promise.reject(error)
   },
@@ -103,6 +122,10 @@ async function request<T>(config: AxiosRequestConfig): Promise<T> {
   if (body.code === CODE.ACCOUNT_DISABLED) {
     redirectToLogin()
     throw new ApiError(body.code, '账号已被禁用，请联系老师')
+  }
+  if (body.code === CODE.FORBIDDEN) {
+    redirectToForbidden()
+    throw new ApiError(body.code, body.message || '无权限')
   }
   if (body.code !== CODE.OK) {
     throw new ApiError(body.code, body.message || '请求失败')

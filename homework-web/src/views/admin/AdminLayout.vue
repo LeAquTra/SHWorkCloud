@@ -1,20 +1,10 @@
 <template>
-  <div class="admin-layout">
-    <header class="header">
-      <div class="brand">
-        <span class="logo">🛠</span>
-        <span class="title">作业云盘 · 管理后台</span>
-      </div>
-      <div class="spacer" />
-      <el-button link type="primary" @click="router.push('/')">
-        <el-icon><Back /></el-icon>
-        <span>返回我的网盘</span>
-      </el-button>
-      <SessionBadge />
-    </header>
+  <div class="admin">
+    <AppHeader />
 
     <div class="body">
       <aside class="menu">
+        <p class="sc-section-title"><span class="sc-dot" />管理后台</p>
         <el-menu :default-active="activePath" router>
           <el-menu-item v-if="user.isAdmin" index="/admin/users">
             <el-icon><User /></el-icon>
@@ -33,9 +23,14 @@
             <span>运维</span>
           </el-menu-item>
         </el-menu>
+
+        <div class="menu-foot">
+          <el-icon><InfoFilled /></el-icon>
+          <span>前端只做入口显隐，真正的权限校验在后端。</span>
+        </div>
       </aside>
 
-      <main class="content">
+      <main class="content sc-scroll-y">
         <router-view />
       </main>
     </div>
@@ -44,12 +39,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { Back, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
-import SessionBadge from '@/components/SessionBadge.vue'
+import { useRoute } from 'vue-router'
+import { InfoFilled, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
+import AppHeader from '@/components/AppHeader.vue'
 import { useUserStore } from '@/stores/user'
 
-const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
 
@@ -67,34 +61,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.admin-layout {
+.admin {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--sc-page-bg);
-}
-
-.header {
-  height: var(--sc-header-h);
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 16px;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.spacer {
-  flex: 1;
+  min-height: 0;
 }
 
 .body {
@@ -104,16 +75,33 @@ onMounted(async () => {
 }
 
 .menu {
-  width: 200px;
-  flex: 0 0 200px;
-  background: #fff;
-  border-right: 1px solid #ebeef5;
+  width: 224px;
+  flex: 0 0 224px;
+  padding: 16px 0;
+  border-right: 1px solid var(--sc-border);
+  background: var(--sc-glass);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+}
+
+.menu .sc-section-title {
+  padding: 0 22px;
+}
+
+.menu-foot {
+  margin: auto 16px 0;
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--sc-text-3);
 }
 
 .content {
   flex: 1;
   min-width: 0;
-  padding: 16px;
-  overflow: auto;
+  padding: 20px var(--sc-gutter);
 }
 </style>

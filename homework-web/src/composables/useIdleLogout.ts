@@ -41,13 +41,29 @@ export function useIdleLogout() {
       countdownTimer = window.setInterval(() => {
         secondsLeft.value -= 1
         if (secondsLeft.value <= 0) {
-          void user.logout()
+          void forceLogout()
         }
       }, 1000)
       logoutTimer = window.setTimeout(() => {
-        void user.logout()
+        void forceLogout()
       }, GRACE_SECONDS * 1000)
     }, warnAfter)
+  }
+
+  /**
+   * 登出并跳回登录页。
+   * 只清 token 不跳转的话，用户会停在一个"已登出但看起来还在"的页面上 ——
+   * 共用电脑场景下这正是最危险的状态。
+   */
+  const forceLogout = async () => {
+    clearTimers()
+    try {
+      await user.logout()
+    } finally {
+      if (!location.pathname.startsWith('/login')) {
+        location.assign('/login')
+      }
+    }
   }
 
   const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const

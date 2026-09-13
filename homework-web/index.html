@@ -6,6 +6,31 @@
     <!-- 内网 http 访问时禁止被外部脚本注入：CSP 兜底 -->
     <meta http-equiv="X-Content-Type-Options" content="nosniff" />
     <title>作业云盘</title>
+    <script>
+      /**
+       * 首屏主题引导。
+       *
+       * 这段脚本必须内联在 <head>：等 Vue 启动再切主题会先闪一下白底
+       * （暗色用户尤其明显）。这里只做一件事——按存储值给 <html> 打上
+       * class，之后由 Pinia 的 theme store 接手。
+       */
+      (function () {
+        try {
+          var mode = localStorage.getItem('sc_theme') || 'auto'
+          var dark =
+            mode === 'dark' ||
+            (mode === 'auto' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          var root = document.documentElement
+          if (dark) root.classList.add('dark')
+          root.dataset.theme = dark ? 'dark' : 'light'
+          root.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* 隐私模式等场景下读不到存储，按亮色渲染即可 */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

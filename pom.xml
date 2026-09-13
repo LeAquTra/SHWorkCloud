@@ -12,7 +12,7 @@
 
     <groupId>com.LeAquTra</groupId>
     <artifactId>SHWorkCloud</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>v1</version>
     <name>SHWorkCloud</name>
     <description>作业云盘 —— 学生机房课堂文件保存系统</description>
 
@@ -116,6 +116,36 @@
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-spring-boot3-starter</artifactId>
             <version>${sa-token.version}</version>
+            <exclusions>
+                <!--
+                  ⚠️ 必须排除 sa-token-jackson，否则应用启动就崩（不是警告，是直接起不来）。
+
+                  Sa-Token 1.45 的插件机制会扫描类路径上所有 jar 的
+                  META-INF/satoken/cn.dev33.satoken.plugin.SaTokenPlugin 并立即 install；
+                  sa-token-jackson 注册了 SaTokenPluginForJackson，而它的 install() 引用了
+                  com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator
+                  —— 那是 **Jackson 2** 的类。Spring Boot 4 用的是 **Jackson 3（tools.jackson）**，
+                  类路径上根本没有 Jackson 2，于是：
+                      NoClassDefFoundError
+                      → SaTokenPluginException(SPI 插件加载失败)
+                      → SaBeanInject 构造失败
+                      → 应用启动失败，systemd 无限重启
+                  而且 Sa-Token 在 loaderPlugins() 里对任何异常都是直接抛出（fail-fast），
+                  不会跳过坏插件，所以只能靠排除依赖解决。
+
+                  排除后 Sa-Token 用核心包里的 SaJsonTemplateDefaultImpl 占位实现，
+                  该实现每个方法都抛 NotImplException("未实现具体的 json 转换器")。
+                  为了不把这个雷留到运行期，项目自己注入了一个基于 Jackson 3 的实现，
+                  见 config/SaTokenJsonConfig.java。
+
+                  依据：docs/SHWordCloud_Standard_v2.0.md §2.2「不要再引入 Jackson 2」。
+                  回归守卫：SaTokenStackTest（重新引入 Jackson 2 会在测试阶段就报错）。
+                -->
+                <exclusion>
+                    <groupId>cn.dev33</groupId>
+                    <artifactId>sa-token-jackson</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- ==================== 邮件（仅自助注册辅通道使用） ==================== -->
@@ -182,6 +212,7 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>4.1.1</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

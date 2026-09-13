@@ -168,7 +168,7 @@ async function doImport() {
 
 .file-name {
   margin-left: 12px;
-  color: #606266;
+  color: var(--sc-text-2);
   font-size: 13px;
 }
 

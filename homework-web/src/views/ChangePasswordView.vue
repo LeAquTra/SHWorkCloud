@@ -1,7 +1,17 @@
 <template>
   <div class="pwd-page">
-    <div class="pwd-card">
-      <h2>修改密码</h2>
+    <div class="glow glow-a" />
+    <div class="glow glow-b" />
+
+    <div class="card sc-fade-up">
+      <div class="brand">
+        <span class="mark"><el-icon><Key /></el-icon></span>
+        <div>
+          <h2>修改密码</h2>
+          <p class="sc-muted">改完请牢记，初始密码是统一的</p>
+        </div>
+      </div>
+
       <el-alert
         v-if="user.mustChangePassword"
         class="tip"
@@ -9,27 +19,50 @@
         :closable="false"
         show-icon
         title="首次登录必须修改初始密码"
-        description="初始密码是统一的，如果不改，同学之间可以互相登录账号。"
+        description="初始密码是统一的。如果不改，同学之间可以互相登录账号。"
       />
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
         <el-form-item label="原密码" prop="oldPassword">
-          <el-input v-model="form.oldPassword" type="password" show-password autocomplete="new-password" />
+          <el-input
+            v-model="form.oldPassword"
+            type="password"
+            size="large"
+            show-password
+            autocomplete="new-password"
+            :prefix-icon="Lock"
+          />
         </el-form-item>
+
         <el-form-item label="新密码" prop="newPassword">
-          <el-input v-model="form.newPassword" type="password" show-password autocomplete="new-password" />
-          <div class="hint">至少 8 位，且必须同时包含字母和数字；不能与学号相同。</div>
+          <el-input
+            v-model="form.newPassword"
+            type="password"
+            size="large"
+            show-password
+            autocomplete="new-password"
+            :prefix-icon="Key"
+          />
+          <!-- 强度条：把"8~32 位 + 字母数字"这条规则变成看得见的反馈 -->
+          <div class="strength">
+            <span v-for="n in 3" :key="n" class="bar" :class="n <= strength.level ? `on-${strength.level}` : ''" />
+            <span class="strength-text" :class="`t-${strength.level}`">{{ strength.label }}</span>
+          </div>
         </el-form-item>
+
         <el-form-item label="确认新密码" prop="confirmPassword">
           <el-input
             v-model="form.confirmPassword"
             type="password"
+            size="large"
             show-password
             autocomplete="new-password"
+            :prefix-icon="CircleCheck"
             @keyup.enter="onSubmit"
           />
         </el-form-item>
-        <el-button type="primary" class="submit" :loading="loading" @click="onSubmit">
+
+        <el-button type="primary" size="large" class="submit" :loading="loading" @click="onSubmit">
           确认修改
         </el-button>
       </el-form>
@@ -38,13 +71,19 @@
         修改成功后其它设备上的登录会被踢下线，当前这台机器保持登录。
       </p>
     </div>
+
+    <div class="corner">
+      <ThemeToggle />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { CircleCheck, Key, Lock } from '@element-plus/icons-vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { authApi } from '@/api'
 import { ApiError } from '@/api/http'
 import { useUserStore } from '@/stores/user'
@@ -55,6 +94,19 @@ const user = useUserStore()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
 const form = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
+const strength = computed(() => {
+  const value = form.newPassword
+  if (!value) {
+    return { level: 0, label: '' }
+  }
+  let score = 0
+  if (value.length >= 8) score += 1
+  if (/[A-Za-z]/.test(value) && /\d/.test(value)) score += 1
+  if (value.length >= 12 || /[^A-Za-z0-9]/.test(value)) score += 1
+  const level = Math.max(1, score) as 1 | 2 | 3
+  return { level, label: ['', '较弱', '一般', '很强'][level] }
+})
 
 /** 与后端 PasswordValidator 的规则保持一致，避免提交后才报错 */
 const rules: FormRules = {
@@ -127,44 +179,148 @@ async function onSubmit() {
 
 <style scoped>
 .pwd-page {
-  height: 100%;
+  position: relative;
+  min-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--sc-page-bg);
+  padding: 40px 24px;
+  overflow: hidden;
 }
 
-.pwd-card {
-  width: 420px;
-  padding: 28px 32px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(31, 71, 136, 0.1);
+.glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
 }
 
-.pwd-card h2 {
-  margin: 0 0 16px;
+.glow-a {
+  width: 460px;
+  height: 460px;
+  top: -160px;
+  left: -100px;
+  background: var(--sc-aurora-1);
+}
+
+.glow-b {
+  width: 400px;
+  height: 400px;
+  bottom: -180px;
+  right: -90px;
+  background: var(--sc-aurora-3);
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  width: min(452px, 100%);
+  padding: 38px 36px;
+  border-radius: var(--sc-radius-xl);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-glass-strong);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--sc-shadow-lg);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
   font-size: 20px;
+  background-image: var(--sc-gradient);
+  box-shadow: var(--sc-shadow-brand);
+}
+
+.brand h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+
+.brand p {
+  margin: 2px 0 0;
+  font-size: 12px;
 }
 
 .tip {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
-.hint {
-  font-size: 12px;
-  color: #909399;
-  line-height: 1.5;
+.strength {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.bar {
+  height: 3px;
+  flex: 1;
+  border-radius: var(--sc-radius-full);
+  background: var(--sc-hover);
+  transition: background-color var(--sc-dur) var(--sc-ease);
+}
+
+.bar.on-1 {
+  background: var(--sc-danger);
+}
+
+.bar.on-2 {
+  background: var(--sc-warning);
+}
+
+.bar.on-3 {
+  background: var(--sc-success);
+}
+
+.strength-text {
+  font-size: 11px;
+  min-width: 26px;
+  text-align: right;
+}
+
+.strength-text.t-1 {
+  color: var(--sc-danger);
+}
+
+.strength-text.t-2 {
+  color: var(--sc-warning);
+}
+
+.strength-text.t-3 {
+  color: var(--sc-success);
 }
 
 .submit {
   width: 100%;
+  height: 44px;
 }
 
 .footnote {
-  margin: 16px 0 0;
+  margin: 18px 0 0;
   font-size: 12px;
-  color: #909399;
+  line-height: 1.6;
+  color: var(--sc-text-3);
   text-align: center;
+}
+
+.corner {
+  position: fixed;
+  top: 18px;
+  right: 20px;
+  z-index: 5;
 }
 </style>

@@ -1,0 +1,285 @@
+/**
+ * 设计令牌（Design Tokens）
+ *
+ * 全部界面只引用 --sc-* 这一层语义变量，明暗两套主题只是同一组变量在不同
+ * 选择器上的取值差异（`:root` 亮色 / `html.dark` 暗色）。这样组件样式无需
+ * 写任何 `html.dark &` 分支，新增组件也不会漏掉暗色适配。
+ *
+ * 末尾把 Element Plus 的 --el-* 变量桥接到 --sc-* 上，让所有内置组件
+ * （表格、弹窗、表单、消息）自动跟随主题，而不用逐个组件覆盖样式。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---------------- 品牌 ---------------- */
+  --sc-brand: #6366f1;
+  --sc-brand-deep: #4f46e5;
+  --sc-brand-violet: #8b5cf6;
+  --sc-brand-cyan: #06b6d4;
+
+  --sc-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #a855f7 100%);
+  --sc-gradient-cyan: linear-gradient(135deg, #06b6d4 0%, #6366f1 100%);
+  --sc-gradient-text: linear-gradient(115deg, #4f46e5 0%, #8b5cf6 48%, #06b6d4 100%);
+  --sc-gradient-veil: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.1) 0%,
+    rgba(139, 92, 246, 0.06) 45%,
+    rgba(6, 182, 212, 0.08) 100%
+  );
+
+  --sc-brand-soft: rgba(99, 102, 241, 0.1);
+  --sc-brand-softer: rgba(99, 102, 241, 0.055);
+  --sc-brand-ring: rgba(99, 102, 241, 0.22);
+
+  /* ---------------- 语义色 ---------------- */
+  --sc-success: #10b981;
+  --sc-warning: #f59e0b;
+  --sc-danger: #ef4444;
+  --sc-info: #64748b;
+
+  /* ---------------- 画布与极光背景 ---------------- */
+  --sc-canvas: #f2f3f9;
+  --sc-aurora-1: rgba(99, 102, 241, 0.26);
+  --sc-aurora-2: rgba(6, 182, 212, 0.2);
+  --sc-aurora-3: rgba(168, 85, 247, 0.18);
+  --sc-grid-line: rgba(15, 23, 42, 0.03);
+
+  /* ---------------- 表面 ---------------- */
+  --sc-surface: #ffffff;
+  --sc-surface-2: #fafaff;
+  --sc-surface-3: #f4f5fa;
+  --sc-glass: rgba(255, 255, 255, 0.7);
+  --sc-glass-strong: rgba(255, 255, 255, 0.88);
+  --sc-glass-border: rgba(255, 255, 255, 0.65);
+  --sc-hover: rgba(15, 23, 42, 0.035);
+  --sc-active: rgba(99, 102, 241, 0.09);
+  --sc-scrim: rgba(12, 16, 28, 0.45);
+  --sc-mask: rgba(255, 255, 255, 0.74);
+  --sc-mask-2: rgba(255, 255, 255, 0.4);
+
+  /* ---------------- 描边 ---------------- */
+  --sc-border: rgba(15, 23, 42, 0.08);
+  --sc-border-2: rgba(15, 23, 42, 0.14);
+
+  /* ---------------- 文本 ---------------- */
+  --sc-text: #0f172a;
+  --sc-text-2: #4a5568;
+  --sc-text-3: #94a3b8;
+  --sc-text-invert: #ffffff;
+
+  /* ---------------- 阴影 ---------------- */
+  --sc-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --sc-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 2px 8px -2px rgba(15, 23, 42, 0.07);
+  --sc-shadow-md: 0 8px 26px -10px rgba(15, 23, 42, 0.16), 0 2px 6px -2px rgba(15, 23, 42, 0.06);
+  --sc-shadow-lg: 0 24px 56px -20px rgba(15, 23, 42, 0.26), 0 8px 20px -12px rgba(15, 23, 42, 0.12);
+  --sc-shadow-brand: 0 12px 28px -12px rgba(99, 102, 241, 0.55);
+
+  /* ---------------- 圆角 ---------------- */
+  --sc-radius-xs: 6px;
+  --sc-radius-sm: 9px;
+  --sc-radius: 12px;
+  --sc-radius-lg: 16px;
+  --sc-radius-xl: 22px;
+  --sc-radius-full: 999px;
+
+  /* ---------------- 动效 ---------------- */
+  --sc-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --sc-ease-io: cubic-bezier(0.4, 0, 0.2, 1);
+  --sc-dur-fast: 0.14s;
+  --sc-dur: 0.24s;
+  --sc-dur-slow: 0.42s;
+  --sc-transition: all var(--sc-dur) var(--sc-ease);
+
+  /* ---------------- 布局 ---------------- */
+  --sc-header-h: 64px;
+  --sc-rail-w: 236px;
+  --sc-panel-w: 352px;
+  --sc-gutter: 20px;
+
+  /* ---------------- 供 color-mix 使用的中性基底 ----------------
+   * 亮色主题的浅色阶是往白里混，暗色主题往 #141414 里混，
+   * 因此下面 --el-*-light-N 只需写一份声明即可同时满足两套主题。 */
+  --sc-mix-base: #ffffff;
+  --sc-mix-ink: #000000;
+}
+
+html.dark {
+  color-scheme: dark;
+
+  --sc-brand: #818cf8;
+  --sc-brand-deep: #6366f1;
+  --sc-brand-violet: #a78bfa;
+  --sc-brand-cyan: #22d3ee;
+
+  --sc-gradient: linear-gradient(135deg, #6366f1 0%, #7c3aed 55%, #a855f7 100%);
+  --sc-gradient-cyan: linear-gradient(135deg, #0891b2 0%, #6366f1 100%);
+  --sc-gradient-text: linear-gradient(115deg, #a5b4fc 0%, #c4b5fd 48%, #67e8f9 100%);
+  --sc-gradient-veil: linear-gradient(
+    135deg,
+    rgba(129, 140, 248, 0.14) 0%,
+    rgba(139, 92, 246, 0.1) 45%,
+    rgba(34, 211, 238, 0.1) 100%
+  );
+
+  --sc-brand-soft: rgba(129, 140, 248, 0.16);
+  --sc-brand-softer: rgba(129, 140, 248, 0.08);
+  --sc-brand-ring: rgba(129, 140, 248, 0.3);
+
+  --sc-success: #34d399;
+  --sc-warning: #fbbf24;
+  --sc-danger: #f87171;
+  --sc-info: #94a3b8;
+
+  --sc-canvas: #070910;
+  --sc-aurora-1: rgba(99, 102, 241, 0.34);
+  --sc-aurora-2: rgba(6, 182, 212, 0.22);
+  --sc-aurora-3: rgba(168, 85, 247, 0.26);
+  --sc-grid-line: rgba(255, 255, 255, 0.028);
+
+  --sc-surface: #10131e;
+  --sc-surface-2: #151827;
+  --sc-surface-3: #1b1f30;
+  --sc-glass: rgba(17, 20, 32, 0.72);
+  --sc-glass-strong: rgba(17, 20, 32, 0.9);
+  --sc-glass-border: rgba(255, 255, 255, 0.08);
+  --sc-hover: rgba(255, 255, 255, 0.05);
+  --sc-active: rgba(129, 140, 248, 0.16);
+  --sc-scrim: rgba(2, 4, 10, 0.62);
+  --sc-mask: rgba(10, 12, 22, 0.72);
+  --sc-mask-2: rgba(10, 12, 22, 0.4);
+
+  --sc-border: rgba(255, 255, 255, 0.08);
+  --sc-border-2: rgba(255, 255, 255, 0.15);
+
+  --sc-text: #edf0f8;
+  --sc-text-2: #a7b0c6;
+  --sc-text-3: #6d768f;
+  --sc-text-invert: #0b0e16;
+
+  --sc-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sc-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 10px -2px rgba(0, 0, 0, 0.5);
+  --sc-shadow-md: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+  --sc-shadow-lg: 0 28px 64px -24px rgba(0, 0, 0, 0.88), 0 10px 24px -14px rgba(0, 0, 0, 0.6);
+  --sc-shadow-brand: 0 14px 34px -14px rgba(99, 102, 241, 0.8);
+
+  --sc-mix-base: #141414;
+  --sc-mix-ink: #ffffff;
+}
+
+/* ============================================================
+ * Element Plus 变量桥接
+ * 放在 element-plus 的两份 css-vars 之后（见 main.ts 的引入顺序），
+ * 因此这里的取值在两个主题下都会生效。
+ * ============================================================ */
+
+:root,
+html.dark {
+  /* 主色。派生色阶用 color-mix 从当前主题的品牌色算出来；
+     老浏览器不支持 color-mix 时会丢弃该声明，退回上面一行的十六进制兜底值，
+     界面依然可用（只是色阶是默认蓝）。 */
+  --el-color-primary: var(--sc-brand);
+  --el-color-primary-light-3: #9294f5;
+  --el-color-primary-light-3: color-mix(in srgb, var(--sc-brand) 70%, var(--sc-mix-base));
+  --el-color-primary-light-5: #b1b3f8;
+  --el-color-primary-light-5: color-mix(in srgb, var(--sc-brand) 50%, var(--sc-mix-base));
+  --el-color-primary-light-7: #d0d1fb;
+  --el-color-primary-light-7: color-mix(in srgb, var(--sc-brand) 30%, var(--sc-mix-base));
+  --el-color-primary-light-8: #e0e0fc;
+  --el-color-primary-light-8: color-mix(in srgb, var(--sc-brand) 20%, var(--sc-mix-base));
+  --el-color-primary-light-9: #eff0fe;
+  --el-color-primary-light-9: color-mix(in srgb, var(--sc-brand) 10%, var(--sc-mix-base));
+  --el-color-primary-dark-2: #4f52c1;
+  --el-color-primary-dark-2: color-mix(in srgb, var(--sc-brand) 80%, var(--sc-mix-ink));
+
+  /* 语义色：同上，不支持 color-mix 时自动退回 Element Plus 自带色阶 */
+  --el-color-success: var(--sc-success);
+  --el-color-success-light-3: color-mix(in srgb, var(--sc-success) 70%, var(--sc-mix-base));
+  --el-color-success-light-5: color-mix(in srgb, var(--sc-success) 50%, var(--sc-mix-base));
+  --el-color-success-light-7: color-mix(in srgb, var(--sc-success) 30%, var(--sc-mix-base));
+  --el-color-success-light-8: color-mix(in srgb, var(--sc-success) 20%, var(--sc-mix-base));
+  --el-color-success-light-9: color-mix(in srgb, var(--sc-success) 10%, var(--sc-mix-base));
+  --el-color-success-dark-2: color-mix(in srgb, var(--sc-success) 80%, var(--sc-mix-ink));
+
+  --el-color-warning: var(--sc-warning);
+  --el-color-warning-light-3: color-mix(in srgb, var(--sc-warning) 70%, var(--sc-mix-base));
+  --el-color-warning-light-5: color-mix(in srgb, var(--sc-warning) 50%, var(--sc-mix-base));
+  --el-color-warning-light-7: color-mix(in srgb, var(--sc-warning) 30%, var(--sc-mix-base));
+  --el-color-warning-light-8: color-mix(in srgb, var(--sc-warning) 20%, var(--sc-mix-base));
+  --el-color-warning-light-9: color-mix(in srgb, var(--sc-warning) 10%, var(--sc-mix-base));
+  --el-color-warning-dark-2: color-mix(in srgb, var(--sc-warning) 80%, var(--sc-mix-ink));
+
+  --el-color-danger: var(--sc-danger);
+  --el-color-danger-light-3: color-mix(in srgb, var(--sc-danger) 70%, var(--sc-mix-base));
+  --el-color-danger-light-5: color-mix(in srgb, var(--sc-danger) 50%, var(--sc-mix-base));
+  --el-color-danger-light-7: color-mix(in srgb, var(--sc-danger) 30%, var(--sc-mix-base));
+  --el-color-danger-light-8: color-mix(in srgb, var(--sc-danger) 20%, var(--sc-mix-base));
+  --el-color-danger-light-9: color-mix(in srgb, var(--sc-danger) 10%, var(--sc-mix-base));
+  --el-color-danger-dark-2: color-mix(in srgb, var(--sc-danger) 80%, var(--sc-mix-ink));
+
+  --el-color-error: var(--sc-danger);
+  --el-color-error-light-3: color-mix(in srgb, var(--sc-danger) 70%, var(--sc-mix-base));
+  --el-color-error-light-5: color-mix(in srgb, var(--sc-danger) 50%, var(--sc-mix-base));
+  --el-color-error-light-7: color-mix(in srgb, var(--sc-danger) 30%, var(--sc-mix-base));
+  --el-color-error-light-8: color-mix(in srgb, var(--sc-danger) 20%, var(--sc-mix-base));
+  --el-color-error-light-9: color-mix(in srgb, var(--sc-danger) 10%, var(--sc-mix-base));
+  --el-color-error-dark-2: color-mix(in srgb, var(--sc-danger) 80%, var(--sc-mix-ink));
+
+  --el-color-info: var(--sc-info);
+  --el-color-info-light-3: color-mix(in srgb, var(--sc-info) 70%, var(--sc-mix-base));
+  --el-color-info-light-5: color-mix(in srgb, var(--sc-info) 50%, var(--sc-mix-base));
+  --el-color-info-light-7: color-mix(in srgb, var(--sc-info) 30%, var(--sc-mix-base));
+  --el-color-info-light-8: color-mix(in srgb, var(--sc-info) 20%, var(--sc-mix-base));
+  --el-color-info-light-9: color-mix(in srgb, var(--sc-info) 10%, var(--sc-mix-base));
+  --el-color-info-dark-2: color-mix(in srgb, var(--sc-info) 80%, var(--sc-mix-ink));
+
+  /* 文本 */
+  --el-text-color-primary: var(--sc-text);
+  --el-text-color-regular: var(--sc-text-2);
+  --el-text-color-secondary: var(--sc-text-3);
+  --el-text-color-placeholder: var(--sc-text-3);
+  --el-text-color-disabled: var(--sc-text-3);
+  --el-text-color-inverse: var(--sc-text-invert);
+
+  /* 描边 */
+  --el-border-color: var(--sc-border);
+  --el-border-color-light: var(--sc-border);
+  --el-border-color-lighter: var(--sc-border);
+  --el-border-color-extra-light: var(--sc-border);
+  --el-border-color-dark: var(--sc-border-2);
+  --el-border-color-darker: var(--sc-border-2);
+  --el-border-color-hover: var(--sc-border-2);
+
+  /* 填充 */
+  --el-fill-color: var(--sc-hover);
+  --el-fill-color-light: var(--sc-hover);
+  --el-fill-color-lighter: var(--sc-hover);
+  --el-fill-color-extra-light: var(--sc-hover);
+  --el-fill-color-dark: var(--sc-active);
+  --el-fill-color-darker: var(--sc-active);
+  --el-fill-color-blank: var(--sc-surface);
+
+  /* 背景 */
+  --el-bg-color: var(--sc-surface);
+  --el-bg-color-page: var(--sc-canvas);
+  --el-bg-color-overlay: var(--sc-surface);
+  --el-mask-color: var(--sc-mask);
+  --el-mask-color-extra-light: var(--sc-mask-2);
+  --el-overlay-color-lighter: var(--sc-scrim);
+
+  /* 禁用态 */
+  --el-disabled-bg-color: var(--sc-hover);
+  --el-disabled-text-color: var(--sc-text-3);
+  --el-disabled-border-color: var(--sc-border);
+
+  /* 阴影 */
+  --el-box-shadow: var(--sc-shadow-md);
+  --el-box-shadow-light: var(--sc-shadow-sm);
+  --el-box-shadow-lighter: var(--sc-shadow-xs);
+  --el-box-shadow-dark: var(--sc-shadow-lg);
+
+  /* 圆角 */
+  --el-border-radius-base: var(--sc-radius);
+  --el-border-radius-small: var(--sc-radius-sm);
+  --el-border-radius-round: var(--sc-radius-full);
+}

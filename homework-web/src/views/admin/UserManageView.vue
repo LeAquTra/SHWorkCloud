@@ -417,7 +417,7 @@ onMounted(async () => {
 }
 
 .muted {
-  color: #909399;
+  color: var(--sc-text-3);
   font-size: 12px;
   margin: 8px 0 0;
 }
