@@ -164,7 +164,7 @@
 
 ## 0.6 实现状态与已知差异
 
-> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（142 个用例，1 个跳过）均通过。
+> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（163 个用例，1 个跳过）均通过。
 > 下列偏差由**本机离线环境**（本地 Maven 仓库缺少部分 artifact）导致，已在代码注释中标注，
 > 完整说明见 `README.md` §7。
 
@@ -189,6 +189,9 @@
 | **OSS 客户端强制 HTTPS** | 未说明 | `OssClientConfig` 用 `ClientBuilderConfiguration.setProtocol(Protocol.HTTPS)` 显式指定 https，并把 endpoint 的协议前缀与结尾斜杠规范化掉 | 🔴 **真实故障**：`aliyun-sdk-oss` 的 `ClientConfiguration` 默认 `Protocol.HTTP`，于是 `generatePresignedUrl` 签出来的直传地址是 `http://`；前端部署在 https 页面后，浏览器以**混合内容（Mixed Content）**为由直接拦掉 XHR，前端只报"网络错误，上传中断"、OSS 侧只看到失败请求，两头都像"网络问题"。同时服务端自身调 OSS 也会走明文。回归守卫：`OssClientHttpsTest` |
 | **注册登录名字符集** | 未说明 | `AccountRules` 强制 `^[0-9A-Za-z]+$`、≤20 字符；非法输入<b>直接报错</b>，不再静默改写 | 原实现是 `replaceAll("[^A-Za-z0-9_]","")` 静默抹字符：填「张三」被抹成空串 → 退化成 `u12345`，用户以为注册成功却登不上（找不到账号）。同时把「仅数字与大小写字母」定为不变量：邮箱派生路径的清洗也去掉下划线，保证落库登录名一律满足该模式 |
 | **后台代改用户资料** | 后台只有状态/配额/密码/角色/删除 | 新增 `PUT /admin/users/{id}`（仅超管），可改 `realName`/`studentNo`/`className`/`email`/`nickname`；**部分更新**语义；学号与邮箱做唯一性校验 | 名单导入只能建号不能改错别字；学号同时是登录名（`selectByLogin` 匹配 username 或 student_no），撞车会让人登到错误账号，必须唯一 |
+| **验证码题库在线阅览** | 未说明 | 后台题库列表由裸实体改为 `AdminVo.CaptchaItemVo`，每项下发 **1 小时有效的签名 `imageUrl`**；前端 `el-image` + `preview-src-list` 点击放大 | 图片在私有 Bucket 且 `captcha/` 前缀不在用户 STS Policy 内，前端无法自拼可访问地址。原来只能看 `dataJson` 文本，等于**看不到题目图片**。单张签名失败只置 null，不让整页 500 |
+| **docx / pptx 内嵌图片在线阅览** | R18 只说"提取正文" | 新增 `GET /files/{id}/embedded-images`：从 zip 的 `word/media/`（pptx 为 `ppt/media/`）取出位图，以 **data URL** 返回；前端在预览弹窗正文下方渲染图片画廊（点击可翻看放大） | 正文提取解析 `document.xml` 时会连标签带图片一起剥掉，**图文作业在"在线阅览"里只剩干巴巴几行字**。用 data URL 而非上传 OSS：预览是只读行为，不应产生新对象（否则又要配套对账清理）。只收 `FileViewType.isRasterImage` 白名单内的位图，emf/wmf 矢量图与 svg 计入 `skipped`；单张 2MB / 累计 8MB / 40 张三重上限 |
+| **后台导航与弹性排版** | 未说明 | `AdminLayout` 的侧栏导航由 `<el-menu router>` 改为 `router-link`；侧栏在 ≤1024px 变顶部横向标签条；新增 `.sc-form-grid` / `.sc-field` / `.sc-toolbar` 等弹性工具类，去掉写死的 `width: 260px` / `max-width: 620px` / `:column="3"` | 🔴 `<el-menu router>` 内部要先取到 `globalProperties.$router` 且 `indexPath` 非空才跳转，否则**静默 return**（不跳转、不报错、`@select` 也不触发），表现正是"导航点了没反应"。`router-link` 是本项目顶栏已在用、确定可用的机制。原排版全为固定像素值，窄屏会横向溢出、按钮被挤出可视区 |
 | **自定义头像** | 文档只有 `avatar` 文本字段（用户填 URL） | 改为**服务端上传到 OSS**（`avatar/{userId}/{uuid}.{ext}`），DB 只存 `avatar_key` | 需求：仅 JPG/PNG、≤5MB、存 OSS；换头像要能定位并删除旧对象，填 URL 做不到 |
 | **删除即清 OSS** | 只有彻底删除才删 OSS | 新增 `app.recycle.enabled=false` 时「删除即彻底删除」；删除用户/头像/题目也同步删 OSS | 需求：保证 OSS 容器整洁 |
 | **OSS 对账** | 无 | 新增 `OssReconcileService` + 每日任务，扫 `homework/`、`avatar/`、`captcha/` 三个前缀清理无引用对象（24 小时宽限） | 远程删除可能失败、进程可能被强杀，必须有兜底才谈得上"整洁" |

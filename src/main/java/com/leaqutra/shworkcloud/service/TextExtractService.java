@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -109,6 +110,9 @@ public class TextExtractService {
             case "docx" -> extractDocx(bytes);
             case "doc" -> extractDoc(bytes);
             case "pptx" -> extractPptx(bytes);
+            // xlsx 的正文 = 单元格纯文本（制表符分隔）；
+            // "原格式"的 HTML 表格版本由 OfficeHtmlService 另外渲染，见 FileService#extractText
+            case "xlsx" -> OfficeHtmlService.xlsxToText(bytes);
             default -> throw new BizException(ErrorCode.PREVIEW_NOT_SUPPORTED,
                     "该 Office 格式暂不支持在线阅览，请下载后查看");
         };
@@ -455,6 +459,136 @@ public class TextExtractService {
             i = end + 1;
         }
         return out.toString();
+    }
+
+    // ---------------------------------------------------------------- 内嵌图片（docx / pptx）
+
+    /** 单张内嵌图片上限：转成 data URL 后还要膨胀约 33%，2MB 原图已经不小 */
+    public static final int MAX_EMBEDDED_IMAGE_BYTES = 2 * 1024 * 1024;
+    /** 一次最多返回的图片原始字节总量 */
+    private static final long MAX_EMBEDDED_TOTAL_BYTES = 8L * 1024 * 1024;
+    /** 一次最多返回多少张，防止"图册型"文档把响应撑爆 */
+    private static final int MAX_EMBEDDED_COUNT = 40;
+
+    /** 文档里内嵌的一张图片（dataUrl 可直接给前端 {@code <img src>}） */
+    public record EmbeddedImage(String name, String contentType, int size, String dataUrl) {
+    }
+
+    /**
+     * 内嵌图片提取结果。
+     *
+     * @param images  可在浏览器直接显示的图片
+     * @param skipped 被跳过的张数：过大 / 超过总量上限 / 超过数量上限 /
+     *                格式不是浏览器可渲染的位图（emf、wmf、svg 等）
+     */
+    public record EmbeddedImages(List<EmbeddedImage> images, int skipped) {
+    }
+
+    /**
+     * 提取 docx / pptx 里内嵌的图片，用于在线阅览。
+     * <p>
+     * 这两种格式都是 zip：docx 的图片在 {@code word/media/}，pptx 在 {@code ppt/media/}。
+     * 之前只提取正文文字、顺手把标签全剥掉，于是<b>图文作业里的图一张都看不到</b>，
+     * 只剩几行干巴巴的字 —— 这就是本方法要补的。
+     * <p>
+     * 以 <b>data URL</b> 形式返回，而不是上传到 OSS：这是一次纯只读的预览行为，
+     * 不该在桶里留下新对象（否则又要配套对账与清理）。代价是 base64 膨胀，
+     * 因此设了单张 / 总量 / 数量三重上限，超出的计入 {@code skipped}。
+     * <p>
+     * 只收浏览器能直接渲染的位图，白名单<b>直接复用 {@link FileViewType#isRasterImage}</b>，
+     * 不在这里另写一份后缀判断；Content-Type 同样走
+     * {@link FileViewType#inlineContentType} 的白名单映射（不回显文档里声明的类型）。
+     * Word 常见的 emf/wmf 矢量图和 svg 一律跳过。
+     */
+    public EmbeddedImages extractEmbeddedImages(String suffix, byte[] bytes) {
+        String normalized = suffix == null ? "" : suffix.trim().toLowerCase();
+        String mediaDir;
+        if ("docx".equals(normalized)) {
+            mediaDir = "word/media/";
+        } else if ("pptx".equals(normalized)) {
+            mediaDir = "ppt/media/";
+        } else {
+            return new EmbeddedImages(List.of(), 0);
+        }
+        if (bytes.length > MAX_OFFICE_BYTES) {
+            throw new BizException(ErrorCode.FILE_TOO_LARGE,
+                    "文档超过 " + (MAX_OFFICE_BYTES / 1024 / 1024) + "MB，请下载后查看");
+        }
+
+        List<EmbeddedImage> images = new ArrayList<>();
+        int skipped = 0;
+        long totalBytes = 0;
+
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
+            ZipEntry entry;
+            long uncompressed = 0;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                // 解压炸弹防护（与正文提取同一套口径）
+                uncompressed += entry.getSize() > 0 ? entry.getSize() : 0;
+                if (uncompressed > MAX_UNCOMPRESSED_BYTES) {
+                    throw new BizException(ErrorCode.BAD_PARAM, "文档解压后过大，已停止解析");
+                }
+
+                String name = entry.getName();
+                if (!name.startsWith(mediaDir)) {
+                    continue;
+                }
+                // 达到数量上限后，后面的条目不再读内容（getNextEntry 会自动跳过剩余字节）
+                if (images.size() >= MAX_EMBEDDED_COUNT) {
+                    skipped++;
+                    continue;
+                }
+                String extension = FileNaming.extension(name);
+                if (!FileViewType.isRasterImage(extension)) {
+                    // emf / wmf / svg / tiff 等：浏览器渲染不了，或属于不安全类型
+                    skipped++;
+                    continue;
+                }
+                byte[] content = readEntryBytes(zip, MAX_EMBEDDED_IMAGE_BYTES);
+                if (content == null || content.length == 0) {
+                    skipped++;
+                    continue;
+                }
+                if (totalBytes + content.length > MAX_EMBEDDED_TOTAL_BYTES) {
+                    skipped++;
+                    continue;
+                }
+                totalBytes += content.length;
+
+                String contentType = FileViewType.inlineContentType(extension);
+                images.add(new EmbeddedImage(
+                        name.substring(name.lastIndexOf('/') + 1),
+                        contentType,
+                        content.length,
+                        "data:" + contentType + ";base64,"
+                                + Base64.getEncoder().encodeToString(content)));
+            }
+        } catch (IOException e) {
+            log.warn("读取内嵌图片失败 suffix={} err={}", normalized, e.getMessage());
+            return new EmbeddedImages(images, skipped);
+        }
+        return new EmbeddedImages(images, skipped);
+    }
+
+    /**
+     * 读一个 zip entry 的全部字节。
+     * <p>超过 {@code limit} 返回 {@code null}；未读完的剩余字节由 {@code ZipInputStream}
+     * 在下次 {@code getNextEntry()} 时自动跳过，不会串到下一个条目。
+     */
+    private static byte[] readEntryBytes(ZipInputStream zip, int limit) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int len;
+        while ((len = zip.read(chunk)) > 0) {
+            if (buffer.size() + len > limit) {
+                return null;
+            }
+            buffer.write(chunk, 0, len);
+        }
+        return buffer.toByteArray();
     }
 
     // ---------------------------------------------------------------- zip 读取

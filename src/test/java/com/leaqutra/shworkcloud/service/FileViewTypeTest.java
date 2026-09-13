@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -57,13 +58,32 @@ class FileViewTypeTest {
         assertEquals(FileViewType.OFFICE, FileViewType.of("docx"));
         assertEquals(FileViewType.OFFICE, FileViewType.of("doc"));
         assertEquals(FileViewType.OFFICE, FileViewType.of("pptx"));
+        // xlsx 也是 zip+xml，可渲染成 HTML 表格，归入 office
+        assertEquals(FileViewType.OFFICE, FileViewType.of("xlsx"));
+    }
+
+    @Test
+    @DisplayName("传输大小档位：视频与压缩包单独成档，其余用全局上限")
+    void transferClass() {
+        assertEquals("video", FileViewType.transferClass("mp4"));
+        assertEquals("video", FileViewType.transferClass("MKV"));
+        assertEquals("archive", FileViewType.transferClass("zip"));
+        assertEquals("archive", FileViewType.transferClass("7z"));
+        assertEquals("archive", FileViewType.transferClass("rar"));
+        // 其余（图片/文档/文本…）没有单独档位 → 用全局 max-file-size-bytes
+        assertNull(FileViewType.transferClass("png"));
+        assertNull(FileViewType.transferClass("docx"));
+        assertNull(FileViewType.transferClass(null));
+
+        assertTrue(FileViewType.isArchive("zip"));
+        assertFalse(FileViewType.isArchive("mp4"));
     }
 
     @Test
     @DisplayName("旧版 .ppt 与可执行文件、压缩包不支持在线阅览")
     void unsupported() {
         assertEquals(FileViewType.NONE, FileViewType.of("ppt"));
-        assertEquals(FileViewType.NONE, FileViewType.of("xlsx"));
+        assertEquals(FileViewType.NONE, FileViewType.of("xls"));
         assertEquals(FileViewType.NONE, FileViewType.of("zip"));
         assertEquals(FileViewType.NONE, FileViewType.of("exe"));
         assertEquals(FileViewType.NONE, FileViewType.of(null));

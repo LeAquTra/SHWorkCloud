@@ -70,38 +70,64 @@
         <el-table-column label="最后登录" width="170">
           <template #default="{ row }">{{ formatTime(row.lastLoginTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
+        <el-table-column label="操作" width="112" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="editProfile(row)">编辑资料</el-button>
-            <el-button
-              link
-              :type="row.status === 1 ? 'danger' : 'success'"
-              :disabled="row.role === 9"
-              @click="toggleStatus(row)"
+            <!--
+              一行一个下拉框：原来 7 个文字按钮挤在固定 360px 里，
+              窄屏会折行、把行高撑得很难看，也容易误点。
+              条件（超管受保护 / 角色项仅超管可见）原样保留在菜单项上。
+            -->
+            <el-dropdown
+              trigger="click"
+              placement="bottom-end"
+              @command="(cmd: string) => onRowCommand(cmd, row)"
             >
-              {{ row.status === 1 ? '禁用' : '启用' }}
-            </el-button>
-            <el-button link type="primary" @click="editQuota(row)">配额</el-button>
-            <el-button link type="primary" @click="resetPassword(row)">重置密码</el-button>
-            <el-button link type="primary" @click="recalc(row)">重算容量</el-button>
-            <el-button
-              v-if="user.isSuperAdmin"
-              link
-              type="primary"
-              :disabled="row.role === 9"
-              @click="editRole(row)"
-            >
-              角色
-            </el-button>
-            <el-button
-              v-if="user.isSuperAdmin"
-              link
-              type="danger"
-              :disabled="row.role === 9"
-              @click="removeUser(row)"
-            >
-              删除
-            </el-button>
+              <el-button link type="primary">
+                操作
+                <el-icon><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="profile">
+                    <el-icon><EditPen /></el-icon>
+                    <span>编辑资料</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="status" :disabled="row.role === 9">
+                    <el-icon><SwitchButton /></el-icon>
+                    <span>{{ row.status === 1 ? '禁用账号' : '启用账号' }}</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="quota">
+                    <el-icon><Coin /></el-icon>
+                    <span>调整配额</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="resetPwd">
+                    <el-icon><Key /></el-icon>
+                    <span>重置密码</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="recalc">
+                    <el-icon><RefreshRight /></el-icon>
+                    <span>重算容量</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="user.isSuperAdmin"
+                    command="role"
+                    :disabled="row.role === 9"
+                    divided
+                  >
+                    <el-icon><UserFilled /></el-icon>
+                    <span>修改角色</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="user.isSuperAdmin"
+                    command="remove"
+                    :disabled="row.role === 9"
+                  >
+                    <el-icon><Delete /></el-icon>
+                    <span>删除账号</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -117,7 +143,7 @@
     </el-card>
 
     <!-- 调整配额 -->
-    <el-dialog v-model="quotaVisible" title="调整容量配额" width="400px">
+    <el-dialog v-model="quotaVisible" title="调整容量配额" width="min(420px, 94vw)">
       <el-form label-width="90px">
         <el-form-item label="用户">
           {{ current?.realName || current?.username }}
@@ -133,7 +159,7 @@
     </el-dialog>
 
     <!-- 修改角色 -->
-    <el-dialog v-model="roleVisible" title="修改角色" width="400px">
+    <el-dialog v-model="roleVisible" title="修改角色" width="min(420px, 94vw)">
       <el-radio-group v-model="newRole">
         <el-radio :value="0">学生</el-radio>
         <el-radio :value="2">教师（机房管理员）</el-radio>
@@ -147,10 +173,13 @@
     </el-dialog>
 
     <!-- 编辑资料（部分更新：只提交填了内容的字段） -->
-    <el-dialog v-model="profileVisible" title="编辑用户资料" width="460px">
-      <el-form label-width="90px">
+    <el-dialog v-model="profileVisible" title="编辑用户资料" width="min(780px, 94vw)">
+      <el-form label-width="90px" class="sc-form-grid">
         <el-form-item label="登录名">
           <span class="muted">{{ current?.username }}（不可修改）</span>
+        </el-form-item>
+        <el-form-item label="昵称">
+          <el-input v-model="profileForm.nickname" maxlength="50" placeholder="不能为空" />
         </el-form-item>
         <el-form-item label="真实姓名">
           <el-input v-model="profileForm.realName" maxlength="50" placeholder="留空表示清空" />
@@ -168,9 +197,6 @@
         <el-form-item label="邮箱">
           <el-input v-model="profileForm.email" maxlength="100" placeholder="留空表示清空" />
         </el-form-item>
-        <el-form-item label="昵称">
-          <el-input v-model="profileForm.nickname" maxlength="50" placeholder="不能为空" />
-        </el-form-item>
       </el-form>
       <p class="muted">
         只有内容发生变化的字段会被提交；学号与邮箱会做唯一性校验。
@@ -187,6 +213,16 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  ArrowDown,
+  Coin,
+  Delete,
+  EditPen,
+  Key,
+  RefreshRight,
+  SwitchButton,
+  UserFilled,
+} from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
 import { ApiError } from '@/api/http'
 import { useUserStore } from '@/stores/user'
@@ -306,6 +342,33 @@ async function saveQuota() {
 }
 
 // ---------------------------------------------------------------- 编辑资料
+
+/** 操作下拉框的统一入口：按 command 分发到各自原有的处理函数 */
+function onRowCommand(command: string, row: AdminUserVO) {
+  switch (command) {
+    case 'profile':
+      editProfile(row)
+      break
+    case 'status':
+      void toggleStatus(row)
+      break
+    case 'quota':
+      editQuota(row)
+      break
+    case 'resetPwd':
+      void resetPassword(row)
+      break
+    case 'recalc':
+      void recalc(row)
+      break
+    case 'role':
+      editRole(row)
+      break
+    case 'remove':
+      void removeUser(row)
+      break
+  }
+}
 
 function editProfile(row: AdminUserVO) {
   current.value = row
@@ -480,20 +543,15 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
-.w180 {
-  width: 180px;
-}
-
-.w160 {
-  width: 160px;
-}
-
-.w130 {
-  width: 130px;
-}
-
+/* 筛选控件改为弹性宽度：宽屏并排，窄屏自动换行且不被压到没法用 */
+.w180,
+.w160,
+.w130,
 .w120 {
-  width: 120px;
+  flex: 1 1 140px;
+  min-width: 118px;
+  max-width: 220px;
+  width: auto;
 }
 
 .spacer {

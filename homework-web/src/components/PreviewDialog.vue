@@ -38,15 +38,32 @@
         </template>
       </el-result>
 
+      <!--
+        媒体加载失败（图片 / 视频 / 音频）。
+        以前这里什么都不做，浏览器就显示"一张裂图 + 文件名（alt 文本）"，
+        既看不出原因也没有出路。现在给出可操作的解释与按钮。
+      -->
+      <el-result
+        v-else-if="mediaError"
+        icon="warning"
+        title="媒体加载失败"
+        sub-title="签名地址可能已过期，或该文件已被清理（例如 OSS 对账判定为无引用对象）。可重试或直接下载。"
+      >
+        <template #extra>
+          <el-button type="primary" @click="load">重试</el-button>
+          <el-button @click="download">下载文件</el-button>
+        </template>
+      </el-result>
+
       <!-- 图片：点击在「适应窗口 / 原始大小」之间切换 -->
       <div v-else-if="kind === 'image'" class="image-stage" :class="{ zoomed }" @click="zoomed = !zoomed">
-        <img :src="streamUrl" :alt="item?.name" />
+        <img :src="streamUrl" :alt="item?.name" @error="mediaError = true" />
       </div>
 
       <iframe v-else-if="kind === 'pdf'" class="pdf-frame" :src="streamUrl" :title="item?.name" />
 
       <div v-else-if="kind === 'video'" class="video-stage">
-        <video :src="streamUrl" controls playsinline preload="metadata" />
+        <video :src="streamUrl" controls playsinline preload="metadata" @error="mediaError = true" />
       </div>
 
       <div v-else-if="kind === 'audio'" class="audio-stage">
@@ -57,7 +74,7 @@
           <strong>{{ item?.name }}</strong>
           <span class="sc-muted">{{ formatSize(item?.size || 0) }}</span>
         </div>
-        <audio :src="streamUrl" controls preload="metadata" />
+        <audio :src="streamUrl" controls preload="metadata" @error="mediaError = true" />
       </div>
 
       <div v-else-if="isText" class="text-stage">
@@ -83,19 +100,70 @@
           <el-tag size="small" effect="light" type="info">
             {{ lineCount === null ? '超长文本' : `${lineCount} 行` }}
           </el-tag>
+          <el-tag v-if="hasHtml" size="small" effect="light" type="success">原格式</el-tag>
           <div class="spacer" />
-          <el-switch v-model="wrap" size="small" active-text="自动换行" />
+          <el-switch
+            v-if="hasHtml"
+            v-model="showRaw"
+            size="small"
+            active-text="纯文本"
+            inactive-text="原格式"
+            inline-prompt
+          />
+          <el-switch v-else v-model="wrap" size="small" active-text="自动换行" />
           <el-button link type="primary" @click="copyAll">
             <el-icon><CopyDocument /></el-icon>
             <span>复制全文</span>
           </el-button>
         </div>
 
-        <div class="code" :class="{ wrap }">
+        <!--
+          docx / xlsx 的"原格式"视图：HTML 由服务端把 OOXML 结构化渲染而成
+          （段落 / 表格 / 加粗 / 对齐 / 内嵌图片），文本内容已在服务端全部转义。
+          这里再过一次前端白名单，作为第二道防线 —— 避免"服务端某处漏转义"
+          就直接变成 XSS。
+        -->
+        <div v-if="hasHtml && !showRaw" class="doc-html" v-html="safeHtml"></div>
+
+        <div v-else class="code" :class="{ wrap, 'with-embed': embeddedImages.length > 0 }">
           <div v-if="lineCount !== null" class="gutter">
             <span v-for="n in lineCount" :key="n">{{ n }}</span>
           </div>
           <pre class="code-body">{{ textData?.content }}</pre>
+        </div>
+
+        <!--
+          docx / pptx 内嵌图片。
+          正文提取只能拿到纯文字（XML 标签连同图片一起被剥掉），
+          所以图文作业的图必须由 /embedded-images 单独取回来。
+          以 data URL 渲染：不需要签名地址，也不占 OSS 对象。
+        -->
+        <div v-if="embeddedImages.length || embeddedSkipped" class="embed-block">
+          <div class="text-toolbar">
+            <el-tag size="small" effect="light" type="success">
+              文档内嵌图片 {{ embeddedImages.length }} 张
+            </el-tag>
+            <span v-if="embeddedSkipped" class="sc-muted">
+              另有 {{ embeddedSkipped }} 张未显示（过大，或是 emf / wmf 等浏览器无法渲染的矢量图）
+            </span>
+          </div>
+          <div class="embed-grid">
+            <el-image
+              v-for="(image, index) in embeddedImages"
+              :key="image.name + index"
+              :src="image.dataUrl"
+              :preview-src-list="embeddedPreviewList"
+              :initial-index="index"
+              preview-teleported
+              hide-on-click-modal
+              fit="contain"
+              class="embed-thumb"
+            >
+              <template #error>
+                <span class="embed-fail">无法显示</span>
+              </template>
+            </el-image>
+          </div>
         </div>
       </div>
 
@@ -128,13 +196,14 @@ import { CopyDocument, Download, Headset } from '@element-plus/icons-vue'
 import FileGlyph from '@/components/FileGlyph.vue'
 import { fileApi } from '@/api'
 import { ApiError } from '@/api/http'
-import type { FileItemVO, TextContentVO } from '@/types/api'
+import type { EmbeddedImageVO, FileItemVO, TextContentVO } from '@/types/api'
 import {
   VIEW_TYPE_LABELS,
   copyText,
   fileTone,
   formatSize,
   resolveViewType,
+  sanitizeOfficeHtml,
   triggerDownload,
 } from '@/utils/format'
 
@@ -166,8 +235,21 @@ const loading = ref(false)
 const error = ref('')
 const streamUrl = ref('')
 const textData = ref<TextContentVO | null>(null)
+/** docx / pptx 内嵌图片（data URL），正文里没有它们 */
+const embeddedImages = ref<EmbeddedImageVO[]>([])
+const embeddedSkipped = ref(0)
 const zoomed = ref(false)
 const wrap = ref(true)
+/** 图片/视频/音频加载失败（签名失效、对象被清理等）—— 由标签的 error 事件置位 */
+const mediaError = ref(false)
+/** 有服务端 HTML 时，是否强制看纯文本（默认看原格式） */
+const showRaw = ref(false)
+
+const hasHtml = computed(() => !!textData.value?.html)
+const safeHtml = computed(() => sanitizeOfficeHtml(textData.value?.html || ''))
+
+/** 点任意一张都能在查看器里左右翻看全部图片 */
+const embeddedPreviewList = computed(() => embeddedImages.value.map((image) => image.dataUrl))
 
 const kind = computed(() => (props.item ? resolveViewType(props.item) : 'none'))
 const tone = computed(() =>
@@ -196,17 +278,40 @@ async function load() {
   error.value = ''
   streamUrl.value = ''
   textData.value = null
+  embeddedImages.value = []
+  embeddedSkipped.value = 0
   zoomed.value = false
+  mediaError.value = false
 
   try {
     if (isText.value) {
       textData.value = await fileApi.text(item.id)
+      // docx / pptx 的图不在正文里，要再取一次。
+      // 这一步是"锦上添花"：内嵌图片接口失败不能连带让正文也显示不出来，
+      // 所以单独 try，失败就只是不显示图片区。
+      if (kind.value === 'office') {
+        try {
+          const embedded = await fileApi.embeddedImages(item.id)
+          embeddedImages.value = embedded.images || []
+          embeddedSkipped.value = embedded.skipped || 0
+        } catch {
+          embeddedImages.value = []
+          embeddedSkipped.value = 0
+        }
+      }
     } else if (kind.value === 'none') {
       // 不支持预览的格式不做请求，直接展示下载引导
     } else if (props.presignedUrl) {
       streamUrl.value = props.presignedUrl
     } else {
       const result = await fileApi.previewUrl(item.id)
+      // ⚠️ 契约守卫：preview-url 必须返回 { url } 对象。
+      // 若后端还是旧版（裸字符串），这里 result.url 会是 undefined，
+      // 而 <img src="undefined"> 只会"裂开一张图"、控制台往往毫无提示，
+      // 很难判断是后端契约变了还是网络问题。所以在这里直接给出明确原因。
+      if (!result || typeof result.url !== 'string' || !result.url) {
+        throw new ApiError(-1, '没能取到预览地址（响应格式不正确，请确认后端已升级）')
+      }
       streamUrl.value = result.url
     }
   } catch (err) {
@@ -412,6 +517,127 @@ watch(
   background: var(--sc-surface-2);
   font-size: 12.5px;
   line-height: 1.65;
+}
+
+/* 有内嵌图片时给正文让一点高度，保证图和字能同时看到 */
+.code.with-embed {
+  max-height: 34vh;
+}
+
+/* ---------- docx / pptx 内嵌图片 ---------- */
+
+.embed-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.embed-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-radius);
+  background: var(--sc-surface-2);
+}
+
+.embed-thumb {
+  width: 136px;
+  height: 104px;
+  border-radius: var(--sc-radius-xs);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-surface);
+  cursor: zoom-in;
+}
+
+.embed-fail {
+  font-size: 12px;
+  color: var(--sc-text-3);
+}
+
+/* ---------- docx / xlsx 原格式视图 ---------- */
+
+.doc-html {
+  max-height: 58vh;
+  overflow: auto;
+  padding: 20px 22px;
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-radius);
+  background: var(--sc-surface);
+  color: var(--sc-text);
+  font-size: 14px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+
+.doc-html :deep(h1),
+.doc-html :deep(h2),
+.doc-html :deep(h3),
+.doc-html :deep(h4),
+.doc-html :deep(h5),
+.doc-html :deep(h6) {
+  margin: 0.9em 0 0.45em;
+  line-height: 1.35;
+}
+
+.doc-html :deep(p) {
+  margin: 0 0 0.55em;
+}
+
+.doc-html :deep(.sc-li) {
+  display: flex;
+  gap: 8px;
+}
+
+.doc-html :deep(.sc-li-mark) {
+  color: var(--sc-brand);
+}
+
+.doc-html :deep(.sc-tab) {
+  display: inline-block;
+  width: 2em;
+}
+
+.doc-html :deep(table) {
+  border-collapse: collapse;
+  margin: 0.6em 0 1em;
+  width: 100%;
+}
+
+.doc-html :deep(td) {
+  border: 1px solid var(--sc-border);
+  padding: 6px 10px;
+  vertical-align: top;
+}
+
+.doc-html :deep(td p) {
+  margin: 0;
+}
+
+.doc-html :deep(.sc-doc-img) {
+  max-width: 100%;
+  height: auto;
+  margin: 6px 0;
+  border-radius: var(--sc-radius-xs);
+}
+
+.doc-html :deep(.sc-sheet-name) {
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+
+.doc-html :deep(.sc-sheet-gap) {
+  height: 18px;
+}
+
+.doc-html :deep(.sc-xlsx-table td) {
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-html :deep(.sc-truncated) {
+  color: var(--sc-text-3);
+  font-size: 12.5px;
 }
 
 .gutter {

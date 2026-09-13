@@ -198,6 +198,19 @@ public class FileController {
     }
 
     /**
+     * 在线阅览 docx / pptx 里<b>内嵌的图片</b>。
+     * <p>
+     * 正文提取会把 XML 标签连同图片一起剥掉，所以图文作业光看 {@code /text}
+     * 是"只有字、没有图"。这里把 {@code word/media/}（pptx 为 {@code ppt/media/}）
+     * 里的位图取出来，以 data URL 返回，前端直接渲染。
+     * <p>非 Office 文件返回空列表；不可渲染的矢量图（emf/wmf）与 svg 计入 {@code skipped}。
+     */
+    @GetMapping("/files/{id}/embedded-images")
+    public R<FileVo.EmbeddedImagesVo> embeddedImages(@PathVariable Long id) {
+        return R.ok(fileService.extractEmbeddedImages(id));
+    }
+
+    /**
      * 图片管理（相册）：跨目录列出本人全部可在线预览的图片，按上传时间倒序。
      * <p>与 {@code GET /files?category=image} 不同：那个只筛当前目录，这个摊平整个网盘。
      * <p>每项都带 {@code previewUrl}（1 小时签名地址，可直接给 {@code <img src>}）。

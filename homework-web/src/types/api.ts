@@ -111,6 +111,11 @@ export interface FileItemVO {
   previewable?: boolean
   createTime: string
   updateTime: string
+  /**
+   * 仅图片有值：1 小时有效的签名缩略图地址。
+   * 列表里直接用它当缩略图显示（像头像那样），不必再逐张请求预览接口。
+   */
+  previewUrl?: string | null
 }
 
 export interface FolderNodeVO {
@@ -143,6 +148,40 @@ export interface TextContentVO {
   truncated: boolean
   maxChars: number
   hint: string | null
+  /**
+   * docx / xlsx 的**结构化 HTML**（服务端渲染，已转义），用于"原格式"阅览；
+   * 其它格式或渲染失败时为 null，前端回退到纯文本视图。
+   */
+  html: string | null
+}
+
+/** `GET /oss/upload-config`：前端上传预检参数，避免把上限硬编码在前端 */
+export interface UploadConfigVO {
+  maxFileSizeBytes: number
+  /** 分类上限，键为 video / archive */
+  transferLimits: Record<string, number>
+  /** 上传整个文件夹时的总大小上限 */
+  folderMaxTotalBytes: number
+}
+
+/**
+ * docx / pptx 里内嵌的一张图片（`GET /files/{id}/embedded-images`）。
+ *
+ * `dataUrl` 形如 `data:image/png;base64,...`，可直接给 `<img src>` ——
+ * 不需要签名地址，也不会在 OSS 里多出对象。
+ */
+export interface EmbeddedImageVO {
+  /** 文档内部的媒体文件名，如 image1.png */
+  name: string
+  contentType: string
+  size: number
+  dataUrl: string
+}
+
+export interface EmbeddedImagesVO {
+  images: EmbeddedImageVO[]
+  /** 被跳过的张数：过大 / 超总量 / 超数量 / 格式不可渲染（emf、wmf、svg 等） */
+  skipped: number
 }
 
 /** `GET /images`：相册项，已带 1 小时签名地址 */
@@ -266,6 +305,7 @@ export interface ImportResultVO {
   failures: ImportFailureVO[]
 }
 
+/** 验证码题库列表项（`GET /admin/captchas`），每项带签名图片地址供在线阅览 */
 export interface CaptchaImageVO {
   id: number
   type: number
@@ -278,9 +318,13 @@ export interface CaptchaImageVO {
   usedCount: number
   status: number
   remark: string | null
-  createdBy: number
+  /**
+   * 服务端签发的 OSS 签名地址（1 小时有效）。
+   * 图片在私有 Bucket 且 `captcha/` 前缀不在用户 STS Policy 内，
+   * 前端拼不出可用地址，必须由接口下发 —— 否则只能看到 dataJson 文本。
+   */
+  imageUrl: string | null
   createTime: string
-  updateTime: string
 }
 
 export interface OrphanVO {

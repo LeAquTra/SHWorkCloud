@@ -53,6 +53,8 @@ public class FileService {
     private static final long SIGN_EXPIRE_SECONDS = 600;
     /** 相册列表里的签名地址有效期（秒）：给长一点，避免滚动浏览时链接失效 */
     private static final long PREVIEW_SIGN_SECONDS = 3600;
+    /** 文件列表里图片缩略图的签名地址有效期（秒）：同上，页面停留久了不能变裂图 */
+    private static final long THUMBNAIL_SECONDS = 3600;
 
     private final FileEntryMapper fileEntryMapper;
     private final UserMapper userMapper;
@@ -114,12 +116,29 @@ public class FileService {
         // viewType 由服务端判定并下发，前端不必自己维护一份后缀白名单
         String viewType = entry.isFolderEntry()
                 ? FileViewType.NONE : FileViewType.of(entry.getSuffix());
+        // 只给图片签缩略图地址：列表里要直接显示小图（像头像那样）。
+        // 其它类型签了没人用，白白拉长每条记录的响应。
+        String previewUrl = FileViewType.IMAGE.equals(viewType)
+                ? thumbnailUrl(entry.getObjectKey()) : null;
         return new FileVo.FileItemVo(
                 entry.getId(), entry.getName(), entry.isFolderEntry(),
                 entry.getSize() == null ? 0L : entry.getSize(),
                 entry.getSuffix(), viewType, entry.getContentType(),
                 entry.getCreateTime(), entry.getUpdateTime(),
-                !FileViewType.NONE.equals(viewType));
+                !FileViewType.NONE.equals(viewType), previewUrl);
+    }
+
+    /** 列表缩略图签名地址；单张签名失败只返回 null，不让整个列表 500 */
+    private String thumbnailUrl(String objectKey) {
+        if (!StringUtils.hasText(objectKey)) {
+            return null;
+        }
+        try {
+            return oss.presignedObjectUrl(objectKey, THUMBNAIL_SECONDS);
+        } catch (Exception e) {
+            log.warn("列表缩略图签名失败 key={} err={}", objectKey, e.getMessage());
+            return null;
+        }
     }
 
     // ------------------------------------------------------------ 目录树
@@ -447,7 +466,9 @@ public class FileService {
             // 只允许图片与 PDF：若把 html/svg 内联，等于在自己的域名下执行脚本
             throw new BizException(ErrorCode.PREVIEW_NOT_SUPPORTED);
         }
-        return oss.presignedPreviewUrl(entry.getObjectKey(), entry.getName(), SIGN_EXPIRE_SECONDS);
+        // 用普通签名 URL（不带 response-* 覆盖）：头像/相册/验证码/缩略图都走这条，
+        // 一直是正常的；带覆盖的那条会让浏览器拿到签名不匹配的地址（详见 OssSignService）
+        return oss.presignedObjectUrl(entry.getObjectKey(), SIGN_EXPIRE_SECONDS);
     }
 
     /**
@@ -511,14 +532,42 @@ public class FileService {
     }
 
     private FileVo.ImageItemVo toImageItem(FileEntry entry) {
-        // 相册里每张图都直接给签名地址，避免前端为每张图再发一次请求
+        // 相册里每张图都直接给签名地址，避免前端为每张图再发一次请求。
+        // ⚠️ 必须用普通签名（不带 response-* 覆盖），否则相册也是"裂图 + 文件名"，
+        // 详见 OssSignService#presignedObjectUrl 上记录的踩坑经过。
         String signed = StringUtils.hasText(entry.getObjectKey())
-                ? oss.presignedPreviewUrl(entry.getObjectKey(), entry.getName(), PREVIEW_SIGN_SECONDS)
+                ? oss.presignedObjectUrl(entry.getObjectKey(), PREVIEW_SIGN_SECONDS)
                 : null;
         return new FileVo.ImageItemVo(entry.getId(), entry.getName(), entry.getSuffix(),
                 entry.getSize() == null ? 0L : entry.getSize(), entry.getParentId(),
                 FileViewType.IMAGE, signed, "/api/files/" + entry.getId() + "/preview",
                 entry.getCreateTime(), entry.getUpdateTime());
+    }
+
+    /**
+     * 在线阅览 docx / pptx 里内嵌的图片。
+     * <p>
+     * 正文提取（{@link #extractText}）会把 XML 标签连图片一起剥掉，
+     * 所以图文作业只看正文接口是"只有字、没有图"。这里把 zip 里
+     * {@code word/media/}（pptx 为 {@code ppt/media/}）的位图取出来，
+     * 以 data URL 返回给前端直接渲染。
+     * <p>非 Office 文件返回空列表（不是错误：前端对任何类型调用都不会炸）。
+     */
+    public FileVo.EmbeddedImagesVo extractEmbeddedImages(Long id) {
+        long userId = loginUser.id();
+        FileEntry entry = support.requireFile(userId, id);
+        String suffix = entry.getSuffix();
+        if (!FileViewType.OFFICE.equals(FileViewType.of(suffix))) {
+            return new FileVo.EmbeddedImagesVo(List.of(), 0);
+        }
+        byte[] bytes = oss.readAll(entry.getObjectKey(), TextExtractService.MAX_OFFICE_BYTES);
+        TextExtractService.EmbeddedImages extracted =
+                textExtractService.extractEmbeddedImages(suffix, bytes);
+        List<FileVo.EmbeddedImageVo> images = extracted.images().stream()
+                .map(image -> new FileVo.EmbeddedImageVo(
+                        image.name(), image.contentType(), image.size(), image.dataUrl()))
+                .toList();
+        return new FileVo.EmbeddedImagesVo(images, extracted.skipped());
     }
 
     /**
@@ -543,8 +592,30 @@ public class FileService {
         TextExtractService.Extracted extracted = textExtractService.extract(suffix, bytes);
         return new FileVo.TextContentVo(entry.getId(), entry.getName(), suffix, viewType,
                 entry.getSize() == null ? bytes.length : entry.getSize(),
-                extracted.charset(), extracted.content(), extracted.truncated(),
+                extracted.charset(), extracted.content(), renderHtml(suffix, bytes),
+                extracted.truncated(),
                 TextExtractService.MAX_CHARS, extracted.hint());
+    }
+
+    /**
+     * 为 docx / xlsx 额外渲染一份结构化 HTML，用于「原格式」在线阅览。
+     * <p>
+     * 刻意<b>不影响</b>纯文本结果：渲染失败（结构异常、被 XXE 防护拦下等）只返回 null，
+     * 前端会自动回退到纯文本视图 —— 看不了"原格式"总比整页打不开好。
+     */
+    private String renderHtml(String suffix, byte[] bytes) {
+        String normalized = suffix == null ? "" : suffix.trim().toLowerCase();
+        try {
+            if ("docx".equals(normalized)) {
+                return OfficeHtmlService.docxToHtml(bytes);
+            }
+            if ("xlsx".equals(normalized)) {
+                return OfficeHtmlService.xlsxToHtml(bytes);
+            }
+        } catch (Exception e) {
+            log.warn("Office 原格式渲染失败 suffix={} err={}", normalized, e.getMessage());
+        }
+        return null;
     }
 
     /**

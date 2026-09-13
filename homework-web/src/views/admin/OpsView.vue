@@ -3,7 +3,7 @@
     <!-- 当前配置 -->
     <el-card shadow="never">
       <template #header><span>当前关键配置</span></template>
-      <el-descriptions :column="3" border>
+      <el-descriptions :column="descColumns" border>
         <el-descriptions-item label="自助注册">
           <el-tag :type="config.registerEnabled ? 'success' : 'info'" size="small">
             {{ config.registerEnabled ? '已开启' : '已关闭（机房推荐）' }}
@@ -100,7 +100,7 @@
           <p>按登录 IP 前缀批量踢出会话。下课后用它清掉某个机房仍登录着的账号。</p>
         </div>
         <div class="op-action">
-          <el-input v-model="ipPrefix" placeholder="如 192.168.1." class="w200" />
+          <el-input v-model="ipPrefix" placeholder="如 192.168.1." class="sc-field" />
           <el-button :loading="working === 'flush'" @click="flushSessions">执行</el-button>
         </div>
       </div>
@@ -109,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '@/api'
 import { ApiError } from '@/api/http'
@@ -121,6 +121,22 @@ const orphans = ref<OrphanVO[]>([])
 const orphanCount = ref(0)
 const ipPrefix = ref('')
 const working = ref<'' | 'paths' | 'reconcile' | 'flush'>('')
+
+/**
+ * 配置说明表格的列数跟着窗口宽度走。
+ * 原来写死 :column="3"，在 1366 宽的笔记本（或分屏后）会被压成三条竖长条，
+ * 字都挤成两行了。
+ */
+const descColumns = ref(3)
+function syncDescColumns() {
+  const width = window.innerWidth
+  descColumns.value = width < 768 ? 1 : width < 1280 ? 2 : 3
+}
+onMounted(() => {
+  syncDescColumns()
+  window.addEventListener('resize', syncDescColumns)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', syncDescColumns))
 
 async function loadConfig() {
   try {
@@ -223,6 +239,8 @@ onMounted(async () => {
 
 .card-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
 }
@@ -239,6 +257,7 @@ onMounted(async () => {
   margin-top: 12px;
   font-size: 12px;
   color: var(--sc-text-2);
+  word-break: break-all;
 }
 
 .inner-net code {
@@ -247,11 +266,18 @@ onMounted(async () => {
   border-radius: var(--sc-radius-xs);
 }
 
+/* 窄屏换成上下排列，不再让"描述 + 按钮"两端对齐硬挤成一行 */
 .op {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 12px 24px;
+}
+
+.op-desc {
+  flex: 1 1 260px;
+  min-width: 0;
 }
 
 .op-desc strong {
@@ -266,10 +292,8 @@ onMounted(async () => {
 
 .op-action {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-}
-
-.w200 {
-  width: 200px;
+  align-items: center;
 }
 </style>

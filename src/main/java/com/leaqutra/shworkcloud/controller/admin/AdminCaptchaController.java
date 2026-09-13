@@ -6,9 +6,9 @@ import com.leaqutra.shworkcloud.common.PageVO;
 import com.leaqutra.shworkcloud.common.R;
 import com.leaqutra.shworkcloud.dto.AdminDto;
 import com.leaqutra.shworkcloud.dto.CaptchaQuery;
-import com.leaqutra.shworkcloud.entity.CaptchaImage;
 import com.leaqutra.shworkcloud.security.ClientIpUtil;
 import com.leaqutra.shworkcloud.service.AdminCaptchaService;
+import com.leaqutra.shworkcloud.vo.AdminVo;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -38,9 +38,10 @@ public class AdminCaptchaController {
     private final AdminCaptchaService adminCaptchaService;
     private final ClientIpUtil clientIpUtil;
 
+    /** 题库列表：每项都带服务端签发的 imageUrl，后台可直接在线阅览题目图片 */
     @SaCheckRole(value = {"admin", "super_admin"}, mode = SaMode.OR)
     @GetMapping
-    public R<PageVO<CaptchaImage>> page(CaptchaQuery query) {
+    public R<PageVO<AdminVo.CaptchaItemVo>> page(CaptchaQuery query) {
         return R.ok(adminCaptchaService.page(query));
     }
 

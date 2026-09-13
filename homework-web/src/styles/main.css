@@ -635,6 +635,104 @@ html.dark {
   display: none;
 }
 
+/* ============================================================
+ * 4. 弹性（响应式）排版工具
+ *
+ * 后台表单原来到处是写死的像素宽度（width: 260px / max-width: 620px /
+ * gap: 48px 且不换行），屏幕一窄就横向溢出、按钮被挤出可视区。
+ * 这里统一改成"按内容自适应 + 自动换行"，从 1280 宽的笔记本到
+ * 分屏后的 700 宽窗口都能正常用。
+ * ============================================================ */
+
+/** 弹性表单栅格：默认每行自动排 1~3 列，窄了自动换行 */
+.sc-form-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 18px;
+  align-items: flex-start;
+}
+
+.sc-form-grid > .el-form-item {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin-right: 0;
+}
+
+/** 占满整行（长文本、按钮行、说明） */
+.sc-form-grid > .el-form-item.sc-span {
+  flex: 1 1 100%;
+}
+
+/** 表单控件自适应宽（替代 width: 260px 这类硬编码） */
+.sc-field {
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.sc-field-full {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+/** 查询/操作条：窄屏自动换行而不是被挤爆 */
+.sc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.sc-toolbar > * {
+  min-width: 0;
+}
+
+/** 统计数字行：窄屏换行 */
+.sc-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 40px;
+}
+
+/** 卡片头：标题与操作按钮在窄屏改为上下排列 */
+.sc-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sc-card-head > * {
+  min-width: 0;
+}
+
+/**
+ * 超窄屏下把带 label-width 的表单整体切成"标签在上、控件在下"，
+ * 否则 label 会占掉一大半宽度，输入框只剩几十像素。
+ * 用 .admin 限定作用域，避免影响登录页等其它表单。
+ */
+@media (max-width: 640px) {
+  .admin .el-form-item {
+    display: block;
+  }
+
+  .admin .el-form-item__label {
+    width: auto !important;
+    text-align: left !important;
+    padding: 0 0 4px;
+    line-height: 1.5;
+  }
+
+  .admin .el-form-item__content {
+    margin-left: 0 !important;
+  }
+
+  .admin .el-dialog {
+    --el-dialog-width: 94vw;
+  }
+}
+
 @keyframes sc-fade-up {
   from {
     opacity: 0;

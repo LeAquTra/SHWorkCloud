@@ -22,6 +22,21 @@ public final class AdminVo {
     public record ResetPasswordVo(Long userId, String username, String initialPassword) {
     }
 
+    /**
+     * 验证码题库列表项（后台专用）。
+     * <p>
+     * ⚠️ {@code imageUrl} 是<b>服务端签发的 OSS 签名地址</b>，必须由后端给：
+     * 图片在私有 Bucket 里，且 {@code captcha/} 前缀不在用户 STS Policy 内，
+     * 前端不可能自己拼出可访问的地址。没有它就只能在表格里看 {@code dataJson} 文本，
+     * 无法在线阅览题目图片（这正是之前缺的）。
+     * <p>答案与标注数据只在这里下发 —— 普通用户的出题接口永远不含答案。
+     */
+    public record CaptchaItemVo(Long id, Integer type, String objectKey, String answer,
+                                String dataJson, Integer width, Integer height, Integer weight,
+                                Long usedCount, Integer status, String remark,
+                                String imageUrl, LocalDateTime createTime) {
+    }
+
     public record ImportFailureVo(int row, String studentNo, String type, String reason) {
     }
 

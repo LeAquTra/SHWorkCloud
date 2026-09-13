@@ -18,6 +18,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 浏览器直传（预签名 URL 方案）。
@@ -69,13 +70,17 @@ public class UploadTicketService {
         rateLimiter.checkStsIssue(userId);
 
         long size = req == null ? 0L : req.size();
-        long maxFileSize = appProperties.getUpload().getMaxFileSizeBytes();
+        String suffix = FileNaming.extension(req == null ? null : req.name());
+        // 分类上限优先：视频与压缩包默认压到 100MB（见 app.upload.transfer-limits），
+        // 其余类型仍走全局的 max-file-size-bytes
+        long maxFileSize = effectiveLimit(suffix);
         if (size <= 0) {
             throw new BizException(ErrorCode.BAD_PARAM, "文件大小不合法");
         }
         if (maxFileSize > 0 && size > maxFileSize) {
+            String label = FileViewType.transferClass(suffix) == null ? "单个文件" : "该类型文件";
             throw new BizException(ErrorCode.FILE_TOO_LARGE,
-                    "单个文件不能超过 " + (maxFileSize / 1024 / 1024) + "MB");
+                    label + "不能超过 " + (maxFileSize / 1024 / 1024) + "MB");
         }
         // 配额预检：避免学生白传几个 GB 之后才在 commit 被拒
         quotaService.ensureFree(userId, size);
@@ -92,6 +97,31 @@ public class UploadTicketService {
                 (int) appProperties.getUpload().getUploadTokenSeconds(),
                 appProperties.getUpload().getInstantThresholdBytes(),
                 maxFileSize);
+    }
+
+    /**
+     * 该文件实际适用的单文件上限：分类上限优先，否则全局上限。
+     * <p>结果会随 ticket 一起下发，前端据此在<b>选文件时就拦</b>，不必等传完才被拒。
+     */
+    private long effectiveLimit(String suffix) {
+        AppProperties.Upload upload = appProperties.getUpload();
+        String transferClass = FileViewType.transferClass(suffix);
+        if (transferClass != null && upload.getTransferLimits() != null) {
+            Long limit = upload.getTransferLimits().get(transferClass);
+            if (limit != null && limit > 0) {
+                return limit;
+            }
+        }
+        return upload.getMaxFileSizeBytes();
+    }
+
+    /** 前端上传预检参数：各类上限集中下发，避免前端把数字再硬编码一遍 */
+    public FileVo.UploadConfigVo uploadConfig() {
+        AppProperties.Upload upload = appProperties.getUpload();
+        return new FileVo.UploadConfigVo(
+                upload.getMaxFileSizeBytes(),
+                upload.getTransferLimits() == null ? Map.of() : upload.getTransferLimits(),
+                upload.getFolderMaxTotalBytes());
     }
 
     /**

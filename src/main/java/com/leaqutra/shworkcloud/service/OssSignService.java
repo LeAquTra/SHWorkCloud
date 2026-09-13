@@ -28,8 +28,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -54,23 +53,25 @@ public class OssSignService {
 
     // ------------------------------------------------------------ 签名 URL
 
-    /** 生成下载用的签名 URL（attachment，强制使用网盘里的显示名） */
+    /**
+     * 生成下载用的签名 URL（attachment，强制使用网盘里的显示名）。
+     * <p>
+     * ⚠️ 覆盖值必须传<b>原始</b>内容，由 SDK 统一编码一次。
+     * 我们曾经在这里先 {@code URLEncoder.encode} 了一遍，SDK 又编码一次，
+     * 结果双重编码 —— 实测生成的 query 是
+     * {@code response-content-disposition=attachment%3Bfilename%3D%25E7%2585%25A7...}，
+     * OSS 返回的 filename 成了一串 {@code %25E7...}，用户存下来的文件名全是百分号，
+     * 而且 {@code URLEncoder} 把空格编成了 {@code +}。详见 {@code OssSignServiceTest}。
+     * <p>中文名走项目已有的 {@link ContentDisposition#attachment}（RFC 5987
+     * {@code filename*=UTF-8''...} + ASCII 回退名），它本身有单测覆盖。
+     */
     public String presignedDownloadUrl(String objectKey, String displayName, long expireSeconds) {
         ResponseHeaderOverrides overrides = new ResponseHeaderOverrides();
-        overrides.setContentDisposition("attachment;filename="
-                + URLEncoder.encode(displayName, StandardCharsets.UTF_8));
+        overrides.setContentDisposition(ContentDisposition.attachment(displayName));
         return presign(objectKey, overrides, expireSeconds);
     }
 
-    /** 生成预览用的签名 URL（inline） */
-    public String presignedPreviewUrl(String objectKey, String displayName, long expireSeconds) {
-        ResponseHeaderOverrides overrides = new ResponseHeaderOverrides();
-        overrides.setContentDisposition("inline;filename="
-                + URLEncoder.encode(displayName, StandardCharsets.UTF_8));
-        overrides.setContentType(previewContentType(displayName));
-        return presign(objectKey, overrides, expireSeconds);
-    }
-
+    /** 带响应头覆盖的签名（目前只给"下载另存为"用） */
     private String presign(String objectKey, ResponseHeaderOverrides overrides, long expireSeconds) {
         GeneratePresignedUrlRequest request =
                 new GeneratePresignedUrlRequest(oss.getBucketName(), objectKey, HttpMethod.GET);
@@ -79,29 +80,33 @@ public class OssSignService {
         return ossClient.generatePresignedUrl(request).toString();
     }
 
-    /** 普通签名 GET URL（验证码图片等，不需要响应头覆盖） */
+    /**
+     * 普通签名 GET URL（<b>不带任何 {@code response-*} 覆盖</b>）。
+     * <p>
+     * ⚠️ <b>在线预览（图片 / PDF / 视频）以及所有"直接给 &lt;img&gt; 用"的地址都走它。</b>
+     * <p>
+     * 为什么预览不用响应头覆盖：<b>全站能正常显示图片的路径都用本方法</b> ——
+     * 头像、验证码、相册、文件列表缩略图；而预览曾经单独用带
+     * {@code response-content-disposition} + {@code response-content-type} 的签名，
+     * 界面上就是<b>「一张裂图 + 文件名（alt 文本）」</b>。
+     * 去掉覆盖后预览与那些已验证可用的路径完全一致。
+     * <p>
+     * 补充说明（避免后人误判）：用探针测试实测过，SDK 对覆盖值的编码是
+     * <b>自洽</b>的（signature 与 URL 用同一份编码），所以覆盖并不会必然导致
+     * {@code SignatureDoesNotMatch}；<b>真正被证实的问题是双重编码</b> ——
+     * 调用方先 {@code URLEncoder.encode} 一次、SDK 再编码一次，
+     * 于是 {@code Content-Disposition} 里的 filename 变成 {@code %25E7%2585%25A7...}
+     * 这种不可读的百分号串（见 {@link #presignedDownloadUrl}）。
+     * <p>
+     * 覆盖对预览本来就是<b>多余</b>的：对象直传时已经带上正确的 Content-Type，
+     * 且没有任何地方给它设过 {@code Content-Disposition: attachment}，
+     * 浏览器自然会内联渲染。
+     */
     public String presignedObjectUrl(String objectKey, long expireSeconds) {
         GeneratePresignedUrlRequest request =
                 new GeneratePresignedUrlRequest(oss.getBucketName(), objectKey, HttpMethod.GET);
         request.setExpiration(new Date(System.currentTimeMillis() + expireSeconds * 1000L));
         return ossClient.generatePresignedUrl(request).toString();
-    }
-
-    private String previewContentType(String name) {
-        String lower = name == null ? "" : name.toLowerCase();
-        if (lower.endsWith(".pdf")) {
-            return "application/pdf";
-        }
-        if (lower.endsWith(".png")) {
-            return "image/png";
-        }
-        if (lower.endsWith(".gif")) {
-            return "image/gif";
-        }
-        if (lower.endsWith(".webp")) {
-            return "image/webp";
-        }
-        return "image/jpeg";
     }
 
     // ------------------------------------------------------------ 对象操作

@@ -91,7 +91,7 @@ mvn spring-boot:run
 ### 3.1 已验证可用的命令
 
 ```bash
-mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 142 个单元测试
+mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 163 个单元测试
 mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository compile
 ```
 
@@ -228,7 +228,7 @@ SHWorkCloud/
 | 回收站 | `GET /api/recycle`、`POST /recycle/restore`、`DELETE /recycle/purge`、`/recycle/empty` | — |
 | 用户 | `GET /api/user/profile`、`PUT /user/profile`、`GET /user/quota` | 资料/个性属性/容量 |
 | 头像 | `POST /api/user/avatar`、`DELETE /api/user/avatar`、`GET /api/user/avatar/{userId}` | 仅 JPG/PNG、≤5MB、存 OSS；换头像自动删旧对象 |
-| 在线阅读 | `GET /api/files/{id}/preview-url`、`GET /api/files/{id}/preview`、`GET /api/files/{id}/text` | 图片/PDF/视频/音频流式预览（支持 Range）；文本与 doc/docx/pptx 提取正文 |
+| 在线阅读 | `GET /api/files/{id}/preview-url`、`GET /api/files/{id}/preview`、`GET /api/files/{id}/text`（含 `html` 原格式）、`GET /api/files/{id}/embedded-images` | 图片/PDF/视频/音频流式预览（支持 Range）；**docx 渲染成结构化 HTML、xlsx 渲染成 HTML 表格**；docx/pptx 内嵌图片以 data URL 返回 |
 | 图片管理 | `GET /api/images` | 跨目录相册列表，每项已带签名预览地址 |
 | 后台 | `GET /api/admin/users`、`PUT /admin/users/{id}/{status,quota,reset-password,role}`、`PUT /admin/users/{id}`（代改资料，部分更新） | 用户管理 |
 | 后台 | `GET /api/admin/students/import-template`、`POST /admin/students/import` | 名单导入 |

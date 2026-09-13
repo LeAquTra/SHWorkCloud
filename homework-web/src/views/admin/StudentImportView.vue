@@ -20,16 +20,20 @@
         description="导入后学生用「学号 + 初始密码」登录，首次登录会被强制修改密码。CSV 兼容 UTF-8 BOM 与 GBK（Excel 直接另存为 CSV 即可）。"
       />
 
-      <el-form label-width="100px" class="form">
+      <el-form label-width="100px" class="form sc-form-grid">
         <el-form-item label="默认班级">
-          <el-input v-model="defaultClass" placeholder="如 高一(3)班（CSV 中留空的班级用此值）" class="w260" />
+          <el-input
+            v-model="defaultClass"
+            placeholder="如 高一(3)班（CSV 中留空的班级用此值）"
+            class="sc-field-full"
+          />
         </el-form-item>
-        <el-form-item label="CSV 文件">
+        <el-form-item label="CSV 文件" class="sc-span">
           <input ref="fileInput" type="file" accept=".csv,text/csv" hidden @change="onPicked" />
           <el-button @click="fileInput?.click()">选择文件</el-button>
           <span v-if="file" class="file-name">{{ file.name }}（{{ formatSize(file.size) }}）</span>
         </el-form-item>
-        <el-form-item>
+        <el-form-item class="sc-span">
           <el-button type="primary" :loading="importing" :disabled="!file" @click="doImport">
             开始导入
           </el-button>
@@ -150,6 +154,8 @@ async function doImport() {
 
 .card-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
 }
@@ -158,23 +164,23 @@ async function doImport() {
   margin-bottom: 16px;
 }
 
+/* 表单宽度交给 .sc-form-grid 弹性决定，不再写死 620px */
 .form {
-  max-width: 620px;
-}
-
-.w260 {
-  width: 260px;
+  width: 100%;
 }
 
 .file-name {
   margin-left: 12px;
   color: var(--sc-text-2);
   font-size: 13px;
+  word-break: break-all;
 }
 
+/* 窄屏换行显示，不再固定 48px 间距撑出横向滚动条 */
 .summary {
   display: flex;
-  gap: 48px;
+  flex-wrap: wrap;
+  gap: 16px 48px;
   margin-bottom: 16px;
 }
 </style>

@@ -143,6 +143,35 @@ export function randomId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
 }
 
+/**
+ * 过滤服务端渲染的 Office HTML（docx / xlsx 的"原格式"视图）。
+ *
+ * ⚠️ 这是**第二道防线**，不是唯一防线：
+ * 服务端 {@code OfficeHtmlService} 已经把文档里的全部文本转义、标签只按白名单生成；
+ * 这里再摘掉脚本类标签、`on*` 事件属性与 `javascript:` 协议，
+ * 是为了避免"服务端某处漏转义"就直接变成 XSS —— 渲染不可信文档成 HTML
+ * 本身就是一个高风险点，值得多一道。
+ *
+ * 用正则而不是 DOM 解析：这些 HTML 完全由我们自己生成，
+ * 结构可预期，不需要完整的 HTML 解析器（也就没有额外的解析差异风险）。
+ */
+export function sanitizeOfficeHtml(raw: string): string {
+  if (!raw) {
+    return ''
+  }
+  return (
+    raw
+      // 整块危险标签（含内容）
+      .replace(/<\s*(script|style|iframe|object|embed|link|meta|form)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+      // 自闭合/未闭合的危险标签
+      .replace(/<\s*\/?\s*(script|style|iframe|object|embed|link|meta|form)\b[^>]*>/gi, '')
+      // 事件属性：onclick=、onerror= …
+      .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      // javascript: / data:text/html 之类的协议
+      .replace(/\s(href|src|xlink:href)\s*=\s*("|')?\s*(javascript|vbscript|data:text\/html)[^"'>]*/gi, '')
+  )
+}
+
 /** 复制文本：非安全上下文下 navigator.clipboard 不可用，降级到 execCommand */
 export async function copyText(text: string): Promise<boolean> {
   try {

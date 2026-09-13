@@ -432,6 +432,102 @@ class TextExtractServiceTest {
         assertEquals(ErrorCode.FILE_TOO_LARGE, e.getErrorCode());
     }
 
+    // ------------------------------------------------------------ 内嵌图片（docx / pptx）
+
+    /** 造一个含二进制条目的 zip（图片是二进制，不能走上面那个 String 版） */
+    private static byte[] zipBytes(Map<String, byte[]> entries) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zos = new ZipOutputStream(out)) {
+            for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
+                zos.putNextEntry(new ZipEntry(entry.getKey()));
+                zos.write(entry.getValue());
+                zos.closeEntry();
+            }
+        }
+        return out.toByteArray();
+    }
+
+    /** 8 字节假 PNG：提取只按扩展名识别、不嗅探内容，所以够用 */
+    private static final byte[] FAKE_PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+
+    @Test
+    @DisplayName("docx 内嵌图片：word/media 下的位图被提取成 data URL")
+    void docxEmbeddedImages() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        entries.put("word/document.xml", "<w:document/>".getBytes(StandardCharsets.UTF_8));
+        entries.put("word/media/image1.png", FAKE_PNG);
+
+        TextExtractService.EmbeddedImages result =
+                service.extractEmbeddedImages("docx", zipBytes(entries));
+        assertEquals(1, result.images().size());
+        assertEquals(0, result.skipped());
+
+        TextExtractService.EmbeddedImage image = result.images().get(0);
+        assertEquals("image1.png", image.name());
+        assertEquals("image/png", image.contentType());
+        assertEquals(FAKE_PNG.length, image.size());
+        assertTrue(image.dataUrl().startsWith("data:image/png;base64,"), image.dataUrl());
+    }
+
+    @Test
+    @DisplayName("pptx 内嵌图片：从 ppt/media 提取")
+    void pptxEmbeddedImages() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        entries.put("ppt/slides/slide1.xml", "<p:sld/>".getBytes(StandardCharsets.UTF_8));
+        entries.put("ppt/media/image1.jpeg", FAKE_PNG);
+
+        TextExtractService.EmbeddedImages result =
+                service.extractEmbeddedImages("pptx", zipBytes(entries));
+        assertEquals(1, result.images().size());
+        assertEquals("image/jpeg", result.images().get(0).contentType());
+    }
+
+    @Test
+    @DisplayName("内嵌图片：emf/wmf 矢量图与 svg 一律跳过（渲染不了 / 不安全），计入 skipped")
+    void skipsUnrenderableAndUnsafeMedia() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        entries.put("word/media/v1.emf", FAKE_PNG);
+        entries.put("word/media/v2.wmf", FAKE_PNG);
+        // svg 与 FileViewType.UNSAFE_IMAGE 口径一致：能渲染也不收
+        entries.put("word/media/v3.svg", "<svg/>".getBytes(StandardCharsets.UTF_8));
+        entries.put("word/media/ok.png", FAKE_PNG);
+
+        TextExtractService.EmbeddedImages result =
+                service.extractEmbeddedImages("docx", zipBytes(entries));
+        assertEquals(1, result.images().size(), "只应留下 ok.png");
+        assertEquals("ok.png", result.images().get(0).name());
+        assertEquals(3, result.skipped());
+    }
+
+    @Test
+    @DisplayName("内嵌图片：单张超过上限的被跳过，而不是把响应撑爆")
+    void skipsOversizedImage() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        entries.put("word/media/huge.png", new byte[TextExtractService.MAX_EMBEDDED_IMAGE_BYTES + 1]);
+        entries.put("word/media/small.png", FAKE_PNG);
+
+        TextExtractService.EmbeddedImages result =
+                service.extractEmbeddedImages("docx", zipBytes(entries));
+        assertEquals(1, result.images().size());
+        assertEquals("small.png", result.images().get(0).name());
+        assertEquals(1, result.skipped());
+    }
+
+    @Test
+    @DisplayName("内嵌图片：非 Office 文件与无图文档都返回空列表，不报错")
+    void embeddedImagesOnNonOfficeAndEmptyDocs() throws IOException {
+        TextExtractService.EmbeddedImages onTxt =
+                service.extractEmbeddedImages("txt", "hello".getBytes(StandardCharsets.UTF_8));
+        assertTrue(onTxt.images().isEmpty());
+        assertEquals(0, onTxt.skipped());
+
+        byte[] docxWithoutImages = minimalDocx("<w:p><w:r><w:t>只有文字</w:t></w:r></w:p>");
+        TextExtractService.EmbeddedImages empty =
+                service.extractEmbeddedImages("docx", docxWithoutImages);
+        assertTrue(empty.images().isEmpty());
+        assertEquals(0, empty.skipped());
+    }
+
     // ------------------------------------------------------------ 不支持的类型
 
     @Test

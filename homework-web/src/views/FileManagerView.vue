@@ -284,12 +284,12 @@ import FolderTree from '@/components/FolderTree.vue'
 import MoveDialog from '@/components/MoveDialog.vue'
 import PreviewDialog from '@/components/PreviewDialog.vue'
 import UploadPanel from '@/components/UploadPanel.vue'
-import { fileApi, userApi } from '@/api'
+import { fileApi, uploadApi, userApi } from '@/api'
 import { ApiError } from '@/api/http'
 import { useIdleLogout } from '@/composables/useIdleLogout'
 import { useUploadStore } from '@/stores/uploader'
 import { useUserStore } from '@/stores/user'
-import type { BreadcrumbVO, FileItemVO, FolderNodeVO } from '@/types/api'
+import type { BreadcrumbVO, FileItemVO, FolderNodeVO, UploadConfigVO } from '@/types/api'
 import { formatSize, triggerDownload } from '@/utils/format'
 
 const props = withDefaults(defineProps<{ initialMode?: 'files' | 'recycle' }>(), {
@@ -327,6 +327,16 @@ const recycleCount = ref(0)
 
 const fileInput = ref<HTMLInputElement>()
 const folderInput = ref<HTMLInputElement>()
+
+/**
+ * 上传预检参数（全局上限 / 分类上限 / 文件夹总大小上限），来自
+ * `GET /oss/upload-config`。取不到就用一份保守的兜底值 —— 真正的把关在后端。
+ */
+const uploadConfig = ref<UploadConfigVO>({
+  maxFileSizeBytes: 0,
+  transferLimits: {},
+  folderMaxTotalBytes: 50 * 1024 * 1024,
+})
 
 const newFolderVisible = ref(false)
 const newFolderName = ref('')
@@ -555,6 +565,18 @@ async function onFolderPicked(event: Event) {
  * 拖拽文件夹与 webkitdirectory 选择共用这一段逻辑。
  */
 async function enqueueWithTree(rows: { file: File; rel: string }[]) {
+  // 文件夹上传是"整包搬运"：单个文件都不大，但加一起很容易把机房共享带宽吃满，
+  // 所以在建目录/开始传之前先按总量拦一次。
+  // 上限由后端 /oss/upload-config 下发（app.upload.folder-max-total-bytes），前端不硬编码。
+  const totalBytes = rows.reduce((sum, row) => sum + row.file.size, 0)
+  const folderLimit = uploadConfig.value.folderMaxTotalBytes || 0
+  if (folderLimit > 0 && totalBytes > folderLimit) {
+    ElMessage.error(
+      `文件夹总大小 ${formatSize(totalBytes)} 超过上限 ${formatSize(folderLimit)}，请分批上传`,
+    )
+    return
+  }
+
   const dirs = new Set<string>()
   rows.forEach((row) => {
     const parts = row.rel.split('/')
@@ -991,6 +1013,12 @@ onMounted(async () => {
     /* 401 已由拦截器处理 */
   }
   await Promise.all([loadTree(), reload()])
+  // 取上传预检参数（各类上限）。失败不阻断页面：用兜底值，服务端仍会强制把关。
+  try {
+    uploadConfig.value = await uploadApi.config()
+  } catch {
+    /* 用兜底值 */
+  }
   window.addEventListener('beforeunload', onBeforeUnload)
   tickClassTime()
   if (classEnd) {

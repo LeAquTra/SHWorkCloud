@@ -43,6 +43,16 @@ public class OssController {
         return R.ok(uploadTicketService.issueTicket(req));
     }
 
+    /**
+     * 上传预检参数：全局上限、分类上限（{@code video} / {@code archive}）、文件夹总大小上限。
+     * <p>集中下发是为了让前端不必把数字再硬编码一遍 ——
+     * 否则改了后端配置就会出现"前端还按旧值拦"的不一致。
+     */
+    @GetMapping("/upload-config")
+    public R<FileVo.UploadConfigVo> uploadConfig() {
+        return R.ok(uploadTicketService.uploadConfig());
+    }
+
     /** 小文件：取单次 PUT 的预签名 URL */
     @PostMapping("/put-url")
     public R<FileVo.PutUrlVo> putUrl(@RequestBody OssDto.PutUrlReq req) {

@@ -13,6 +13,7 @@ import com.leaqutra.shworkcloud.dto.CaptchaQuery;
 import com.leaqutra.shworkcloud.entity.CaptchaImage;
 import com.leaqutra.shworkcloud.mapper.CaptchaImageMapper;
 import com.leaqutra.shworkcloud.security.LoginUser;
+import com.leaqutra.shworkcloud.vo.AdminVo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,13 +40,25 @@ public class AdminCaptchaService {
     private static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024;
     private static final Set<String> ALLOWED_EXT = Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp");
 
+    /**
+     * 列表里图片签名地址的有效期。
+     * <p>用 1 小时：与头像、相册预览一致。出题接口那个 5 分钟太短 ——
+     * 后台可能开着页面慢慢翻题库，5 分钟后就整页图裂了。
+     */
+    private static final long IMAGE_URL_SECONDS = 3600;
+
     private final CaptchaImageMapper captchaImageMapper;
     private final OssSignService ossSignService;
     private final CaptchaService captchaService;
     private final AuditService auditService;
     private final LoginUser loginUser;
 
-    public PageVO<CaptchaImage> page(CaptchaQuery query) {
+    /**
+     * 题库列表。
+     * <p>每项都带上服务端签发的 {@code imageUrl}，后台才能<b>在线阅览题目图片</b>；
+     * 之前直接返回裸实体，前端只有 {@code objectKey}，根本显示不出图。
+     */
+    public PageVO<AdminVo.CaptchaItemVo> page(CaptchaQuery query) {
         LambdaQueryWrapper<CaptchaImage> wrapper = new LambdaQueryWrapper<>();
         if (query.getType() != null) {
             wrapper.eq(CaptchaImage::getType, query.getType());
@@ -55,7 +68,34 @@ public class AdminCaptchaService {
         }
         wrapper.orderByDesc(CaptchaImage::getId);
         Page<CaptchaImage> page = new Page<>(query.normalizedPage(), query.normalizedSize());
-        return PageVO.of(captchaImageMapper.selectPage(page, wrapper));
+        return PageVO.of(captchaImageMapper.selectPage(page, wrapper), this::toItemVo);
+    }
+
+    private AdminVo.CaptchaItemVo toItemVo(CaptchaImage image) {
+        return new AdminVo.CaptchaItemVo(
+                image.getId(), image.getType(), image.getObjectKey(), image.getAnswer(),
+                image.getDataJson(), image.getWidth(), image.getHeight(), image.getWeight(),
+                image.getUsedCount(),
+                image.getStatus() == null ? null : image.getStatus().intValue(),
+                image.getRemark(), signedImageUrl(image.getObjectKey()),
+                image.getCreateTime());
+    }
+
+    /**
+     * 签图片地址。
+     * <p>单张签名失败（例如对象已被手工删除）只返回 null，不让整个列表 500 ——
+     * 后台列表里坏一张图是可以接受的，整页打不开不行。
+     */
+    private String signedImageUrl(String objectKey) {
+        if (!StringUtils.hasText(objectKey)) {
+            return null;
+        }
+        try {
+            return ossSignService.presignedObjectUrl(objectKey, IMAGE_URL_SECONDS);
+        } catch (Exception e) {
+            log.warn("验证码图片签名失败 key={} err={}", objectKey, e.getMessage());
+            return null;
+        }
     }
 
     /** 题库概览：题库为空时注册接口不可用，后台需要醒目提示 */

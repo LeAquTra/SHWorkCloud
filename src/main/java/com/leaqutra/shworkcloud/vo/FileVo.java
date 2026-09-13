@@ -2,6 +2,7 @@ package com.leaqutra.shworkcloud.vo;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文件与上传相关响应体。
@@ -38,11 +39,15 @@ public final class FileVo {
      * <p>{@code viewType} 由服务端判定，前端据此决定怎么渲染（不要再自己写一份后缀白名单）：
      * {@code image} / {@code pdf} / {@code video} / {@code audio} 用流式预览接口，
      * {@code text} / {@code office} 用 {@code /files/{id}/text}，{@code none} 只能下载。
+     *
+     * @param previewUrl 仅<b>图片</b>有值：1 小时有效的签名缩略图地址，
+     *                   列表里可直接当缩略图显示（像头像那样），不必再逐张请求预览接口；
+     *                   其它类型为 {@code null}（签了也没人用，只会白增响应体积）
      */
     public record FileItemVo(Long id, String name, boolean folder, long size, String suffix,
                              String viewType, String contentType,
                              LocalDateTime createTime, LocalDateTime updateTime,
-                             boolean previewable) {
+                             boolean previewable, String previewUrl) {
     }
 
     /**
@@ -70,19 +75,55 @@ public final class FileVo {
     public record UrlVo(String url) {
     }
 
-    /** 文本/Office 正文阅览结果 */
+    /**
+     * 文本/Office 正文阅览结果。
+     *
+     * @param content 纯文本（可复制、可检索）
+     * @param html    docx / xlsx 的<b>结构化 HTML</b>，用于"原格式"渲染；
+     *                其它格式、或渲染失败时为 {@code null}，前端回退到纯文本视图
+     */
     public record TextContentVo(Long id, String name, String suffix, String viewType, long size,
-                                String charset, String content, boolean truncated,
+                                String charset, String content, String html, boolean truncated,
                                 int maxChars, String hint) {
     }
 
     public record FolderNodeVo(Long id, String name, List<FolderNodeVo> children) {
     }
 
+    /**
+     * docx / pptx 里内嵌的一张图片。
+     * <p>{@code dataUrl} 形如 {@code data:image/png;base64,...}，前端可直接给
+     * {@code <img src>} —— 不需要再要签名地址，也不会在 OSS 里多出对象。
+     */
+    public record EmbeddedImageVo(String name, String contentType, int size, String dataUrl) {
+    }
+
+    /**
+     * 内嵌图片列表（在线阅览图文作业用）。
+     *
+     * @param images  可在浏览器直接显示的图片
+     * @param skipped 被跳过的张数：过大 / 超总量 / 超数量 / 非可渲染位图（emf、wmf、svg 等）
+     */
+    public record EmbeddedImagesVo(List<EmbeddedImageVo> images, int skipped) {
+    }
+
     public record BreadcrumbVo(Long id, String name) {
     }
 
     public record UploadSessionVo(Long uploadId, String uploadKey, long partSize) {
+    }
+
+    /**
+     * 前端上传预检参数（{@code GET /oss/upload-config}）。
+     * <p>把各类上限集中下发，前端就不必把数字再硬编码一遍 ——
+     * 改配置时不会出现"后端改了、前端还按旧值拦"的不一致。
+     *
+     * @param maxFileSizeBytes     全局单文件上限
+     * @param transferLimits       分类上限，键为 {@code video} / {@code archive}
+     * @param folderMaxTotalBytes  上传整个文件夹时的总大小上限（客户端预检）
+     */
+    public record UploadConfigVo(long maxFileSizeBytes, Map<String, Long> transferLimits,
+                                 long folderMaxTotalBytes) {
     }
 
     /**

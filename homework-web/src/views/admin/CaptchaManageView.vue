@@ -24,6 +24,29 @@
       />
 
       <el-table v-loading="loading" :data="rows" row-key="id">
+        <el-table-column label="图片" width="118">
+          <template #default="{ row }">
+            <!--
+              在线阅览：click 缩略图即放大到全屏（preview-src-list）。
+              imageUrl 是后端签发的 OSS 签名地址 —— 图片在私有 Bucket 里，
+              前端自己拼不出可访问地址，所以必须由接口下发。
+            -->
+            <el-image
+              v-if="row.imageUrl"
+              :src="row.imageUrl"
+              :preview-src-list="[row.imageUrl]"
+              preview-teleported
+              hide-on-click-modal
+              fit="contain"
+              class="thumb"
+            >
+              <template #error>
+                <span class="thumb-missing">加载失败</span>
+              </template>
+            </el-image>
+            <span v-else class="thumb-missing">无图</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column label="题型" width="110">
           <template #default="{ row }">{{ typeLabel(row.type) }}</template>
@@ -44,13 +67,39 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="112" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link :type="row.status === 1 ? 'warning' : 'success'" @click="toggle(row)">
-              {{ row.status === 1 ? '停用' : '启用' }}
-            </el-button>
-            <el-button link type="danger" @click="remove(row)">删除</el-button>
+            <!-- 与用户管理保持一致：每行一个操作下拉框 -->
+            <el-dropdown
+              trigger="click"
+              placement="bottom-end"
+              @command="(cmd: string) => onRowCommand(cmd, row)"
+            >
+              <el-button link type="primary">
+                操作
+                <el-icon><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="preview" :disabled="!row.imageUrl">
+                    <el-icon><ZoomIn /></el-icon>
+                    <span>在线阅览</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="edit">
+                    <el-icon><EditPen /></el-icon>
+                    <span>编辑</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="toggle">
+                    <el-icon><SwitchButton /></el-icon>
+                    <span>{{ row.status === 1 ? '停用' : '启用' }}</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="remove" divided>
+                    <el-icon><Delete /></el-icon>
+                    <span>删除</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -65,12 +114,27 @@
       />
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑题目' : '上传题目'" width="560px">
-      <el-form label-width="90px">
-        <el-form-item v-if="!editing" label="图片">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="editing ? '编辑题目' : '上传题目'"
+      width="min(620px, 94vw)"
+    >
+      <el-form label-width="90px" class="sc-form-grid">
+        <el-form-item v-if="!editing" label="图片" class="sc-span">
           <input ref="fileInput" type="file" accept="image/*" hidden @change="onPicked" />
           <el-button @click="fileInput?.click()">选择图片</el-button>
           <span v-if="file" class="file-name">{{ file.name }}</span>
+        </el-form-item>
+        <!-- 编辑时把当前图片也展示出来，改答案/标注时不用来回切页面 -->
+        <el-form-item v-else-if="editing.imageUrl" label="当前图片" class="sc-span">
+          <el-image
+            :src="editing.imageUrl"
+            :preview-src-list="[editing.imageUrl]"
+            preview-teleported
+            hide-on-click-modal
+            fit="contain"
+            class="thumb-lg"
+          />
         </el-form-item>
         <el-form-item label="题型">
           <el-radio-group v-model="form.type">
@@ -85,7 +149,7 @@
             :placeholder="form.type === 3 ? '点选点的 ID 顺序，如 3,1,2' : form.type === 2 ? '正确选项的 k，如 B' : '图中字符，如 K7P2'"
           />
         </el-form-item>
-        <el-form-item v-if="form.type !== 1" label="标注数据">
+        <el-form-item v-if="form.type !== 1" label="标注数据" class="sc-span">
           <el-input
             v-model="form.dataJson"
             type="textarea"
@@ -102,7 +166,7 @@
         <el-form-item label="权重">
           <el-input-number v-model="form.weight" :min="1" :max="1000" />
         </el-form-item>
-        <el-form-item label="备注">
+        <el-form-item label="备注" class="sc-span">
           <el-input v-model="form.remark" placeholder="仅后台可见" />
         </el-form-item>
       </el-form>
@@ -111,12 +175,22 @@
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 全屏图片阅览器：列表缩略图或操作菜单都能打开 -->
+    <el-image-viewer
+      v-if="viewerVisible"
+      :url-list="[viewerUrl]"
+      teleported
+      hide-on-click-modal
+      @close="viewerVisible = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown, Delete, EditPen, SwitchButton, ZoomIn } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
 import { ApiError } from '@/api/http'
 import type { CaptchaImageVO } from '@/types/api'
@@ -155,6 +229,38 @@ const dataHint = computed(() =>
     ? '选项数组：k 为选项标识（答案填对应的 k），label 为展示文字。'
     : '标注点数组：id 为点编号，x/y 为原图像素坐标，label 为文字标签；答案填点击顺序的 id。',
 )
+
+// —— 图片在线阅览（从操作下拉框的"在线阅览"进入）——
+const viewerVisible = ref(false)
+const viewerUrl = ref('')
+
+/** 操作下拉框的统一入口 */
+function onRowCommand(command: string, row: CaptchaImageVO) {
+  switch (command) {
+    case 'preview':
+      openViewer(row.imageUrl)
+      break
+    case 'edit':
+      openEdit(row)
+      break
+    case 'toggle':
+      void toggle(row)
+      break
+    case 'remove':
+      void remove(row)
+      break
+  }
+}
+
+function openViewer(url: string | null) {
+  if (!url) {
+    // 后端没下发 imageUrl（多半是 jar 还没升级到带该字段的版本）
+    ElMessage.warning('这张题目没有可用的图片地址，请确认后端已升级到最新版本')
+    return
+  }
+  viewerUrl.value = url
+  viewerVisible.value = true
+}
 
 function typeLabel(type: number) {
   return type === 1 ? '字符输入' : type === 2 ? '单选' : '点选'
@@ -278,8 +384,35 @@ onMounted(reload)
 
 .card-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
+}
+
+/* 列表缩略图：固定 64×40，点击放大到全屏（el-image 的 preview-src-list） */
+.thumb {
+  width: 72px;
+  height: 44px;
+  border-radius: var(--sc-radius-xs);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-surface-2);
+  cursor: zoom-in;
+  display: block;
+}
+
+.thumb-lg {
+  max-width: 260px;
+  max-height: 160px;
+  border-radius: var(--sc-radius-sm);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-surface-2);
+  cursor: zoom-in;
+}
+
+.thumb-missing {
+  font-size: 12px;
+  color: var(--sc-text-3);
 }
 
 .mr8 {

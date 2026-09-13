@@ -7,6 +7,7 @@ import type {
   CaptchaImageVO,
   CaptchaVO,
   CommitVO,
+  EmbeddedImagesVO,
   FileItemVO,
   FolderNodeVO,
   ImageItemVO,
@@ -23,6 +24,7 @@ import type {
   ResetPasswordVO,
   SessionFlushVO,
   TextContentVO,
+  UploadConfigVO,
   UploadTicketVO,
   UploadedPartVO,
   UrlVO,
@@ -126,6 +128,12 @@ export const fileApi = {
   previewUrl: (id: number) => get<UrlVO>(`/files/${id}/preview-url`),
   /** text / office 走它拿正文（服务端已处理 GBK / BOM） */
   text: (id: number) => get<TextContentVO>(`/files/${id}/text`),
+  /**
+   * docx / pptx 内嵌图片（图文作业在线阅览用）。
+   * 正文提取会把图片连标签一起剥掉，所以图文作业必须再调这个接口拿图。
+   * 非 Office 文件返回空列表，不会报错。
+   */
+  embeddedImages: (id: number) => get<EmbeddedImagesVO>(`/files/${id}/embedded-images`),
 
   recycleList: (page = 1, size = 50) => get<PageVO<FileItemVO>>('/recycle', { page, size }),
   restore: (ids: number[]) => post<number>('/recycle/restore', { ids }),
@@ -143,6 +151,12 @@ export const imageApi = {
 // ---------------------------------------------------------------- 上传
 
 export const uploadApi = {
+  /**
+   * 上传预检参数：全局上限 / 分类上限（video、archive）/ 文件夹总大小上限。
+   * 集中从后端取，前端不硬编码数字 —— 否则改配置就会出现两边不一致。
+   */
+  config: () => get<UploadConfigVO>('/oss/upload-config'),
+
   /** 申请上传凭证：服务端确定 ObjectKey 并签发一次性 uploadToken */
   ticket: (body: { name: string; size: number; contentType?: string }) =>
     post<UploadTicketVO>('/oss/ticket', body),

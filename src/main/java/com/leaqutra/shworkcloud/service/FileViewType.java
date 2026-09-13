@@ -60,8 +60,35 @@ public final class FileViewType {
      * doc 是 OLE2 二进制格式，容器交给 Apache POI 的 {@code poifs}，
      * Word 侧的 FIB + piece table 由 {@link TextExtractService} 自己解析。
      * <p>旧版 {@code .ppt} 是二进制格式且没有可靠的无依赖解析方案，不在集合里。
+     * <p>xlsx 同样是 zip+xml，可渲染成 HTML 表格；旧版 {@code .xls}（二进制）不在集合里。
      */
-    private static final Set<String> OFFICE_SET = ordered("doc", "docx", "pptx");
+    private static final Set<String> OFFICE_SET = ordered("doc", "docx", "pptx", "xlsx");
+
+    /** 压缩包：与视频一起走「单独配置的传输上限」（见 app.upload.transfer-limits） */
+    private static final Set<String> ARCHIVE_SET = ordered(
+            "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "iso");
+
+    /**
+     * 传输大小档位：用于查 {@code app.upload.transfer-limits} 里的分类上限。
+     * <p>返回 {@code null} 表示该后缀没有单独档位，用全局的
+     * {@code app.upload.max-file-size-bytes}。
+     * <p>刻意<b>不动</b> {@link #category}：分类值（image/document/video/audio/other）
+     * 是前端筛选用的公开契约，加一个新分类会牵动界面；这里只做一个独立的判定。
+     */
+    public static String transferClass(String suffix) {
+        String s = normalize(suffix);
+        if (VIDEO_SET.contains(s)) {
+            return "video";
+        }
+        if (ARCHIVE_SET.contains(s)) {
+            return "archive";
+        }
+        return null;
+    }
+
+    public static boolean isArchive(String suffix) {
+        return ARCHIVE_SET.contains(normalize(suffix));
+    }
 
     private static final Set<String> VIDEO_SET = ordered(
             "mp4", "webm", "mov", "m4v", "ogv", "avi", "mkv", "wmv", "flv");

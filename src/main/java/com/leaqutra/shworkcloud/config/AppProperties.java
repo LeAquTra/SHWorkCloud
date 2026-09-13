@@ -5,7 +5,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 应用级业务配置（对应 application.yaml 的 app.*）。
@@ -92,6 +94,26 @@ public class AppProperties {
         private long uploadTokenSeconds = 7200;
         /** 超过该大小的文件用抽样指纹而不是全量 MD5 */
         private long instantThresholdBytes = 200L * 1024 * 1024;
+
+        /**
+         * 分类传输上限（字节），<b>覆盖</b> {@link #maxFileSizeBytes}。
+         * <p>键取 {@link com.leaqutra.shworkcloud.service.FileViewType#transferClass(String)}
+         * 的返回值，目前是 {@code video} 与 {@code archive}。
+         * <p>用途：压缩包与视频往往是"整包搬运"，在机房共享出口带宽下会拖垮全班，
+         * 所以单独压到 100MB；其余类型仍走全局的 2GB。
+         */
+        private Map<String, Long> transferLimits = new LinkedHashMap<>(Map.of(
+                "video", 100L * 1024 * 1024,
+                "archive", 100L * 1024 * 1024));
+
+        /**
+         * 上传整个文件夹时，所有文件的<b>总大小</b>上限（字节），默认 50MB。
+         * <p>文件夹上传是"批量搬运"，单个文件都不大但加一起很容易把带宽吃满，
+         * 所以在客户端<b>开始传之前</b>就要按总量拦一次。
+         * <p>注意这是客户端预检（服务端看不到"这是一次文件夹上传"），
+         * 用于快速失败与提示，不构成安全边界 —— 单文件上限仍然由服务端强制。
+         */
+        private long folderMaxTotalBytes = 50L * 1024 * 1024;
     }
 
     // ---------------------------------------------------------------- 验证码

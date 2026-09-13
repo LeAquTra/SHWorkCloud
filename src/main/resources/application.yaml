@@ -115,6 +115,14 @@ app:
     # uploadToken 有效期：必须够传完一个大文件（机房共享带宽下 500MB 可能要十几分钟）
     upload-token-seconds: 7200
     instant-threshold-bytes: 209715200   # >200MB 用抽样指纹
+    # 分类传输上限（覆盖 max-file-size-bytes）：压缩包与视频属于"整包搬运"，
+    # 在机房共享出口带宽下会拖垮全班，单独压到 100MB。
+    # 键取 FileViewType.transferClass 的返回值（video / archive）。
+    transfer-limits:
+      video: 104857600                   # 100MB
+      archive: 104857600                 # 100MB
+    # 上传整个文件夹时的总大小上限（客户端预检，见 GET /oss/upload-config）
+    folder-max-total-bytes: 52428800     # 50MB
   captcha:
     image-url-expire-seconds: 300
     session-expire-seconds: 300
