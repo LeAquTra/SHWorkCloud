@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     作业云盘后端 API 冒烟验证（无需前端）。
 
@@ -21,6 +21,12 @@
 .PARAMETER FilePath
     要上传的本地文件。不传则自动生成一个带中文名的临时文件（顺便验证中文文件名下载）。
 
+.PARAMETER CaptchaPassToken
+    人机验证凭证。后台题库启用后，登录与申请上传凭证都需要它（业务码 40105）。
+    获取方式：在浏览器里过一次验证码，从 POST /auth/captcha/verify 的响应里取
+    captchaPassToken（默认 5 分钟内有效，且本项目**不消费**它，所以登录与上传可以共用一个）。
+    也可以临时把 CAPTCHA_ENABLED 设为 false 并重启服务，跑完再改回来。
+
 .EXAMPLE
     # 用超管账号跑全链路
     ./scripts/api-smoke.ps1 -Login admin -Password 'YourInitPassword'
@@ -28,6 +34,10 @@
 .EXAMPLE
     # 上传指定文件
     ./scripts/api-smoke.ps1 -Login 20260001 -Password 'Sh@2026' -FilePath D:\demo.docx
+
+.EXAMPLE
+    # 题库已启用（登录需要人机验证）时
+    ./scripts/api-smoke.ps1 -Login admin -Password 'YourInitPassword' -CaptchaPassToken 5f3c...
 #>
 [CmdletBinding()]
 param(
@@ -35,7 +45,8 @@ param(
     [string]$Login = '',
     [string]$Password = '',
     [string]$FilePath = '',
-    [string]$DownloadDir = ''
+    [string]$DownloadDir = '',
+    [string]$CaptchaPassToken = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -190,6 +201,22 @@ try {
     Write-Fail $_.Exception.Message
 }
 
+Write-Step '公开接口：人机验证配置（登录/注册/上传）'
+$humanCheck = $null
+try {
+    $humanCheck = Invoke-Api -Method GET -Path '/auth/human-check'
+    Write-Ok "login=$($humanCheck.login) register=$($humanCheck.register) upload=$($humanCheck.upload) passTtl=$($humanCheck.passTtlSeconds)s"
+    $needsCaptcha = $humanCheck.login -or $humanCheck.upload -or $humanCheck.register
+    if ($needsCaptcha -and -not $CaptchaPassToken) {
+        Write-Info '⚠️ 当前后台题库已启用：登录 / 申请上传凭证会返回 40105「请先完成人机验证」。'
+        Write-Info '   处理方式（二选一）：'
+        Write-Info '   A. 传 -CaptchaPassToken <凭证>：浏览器过一次验证码，从 /auth/captcha/verify 响应里取；'
+        Write-Info '   B. 临时关闭：在服务器 env 里设 CAPTCHA_ENABLED=false 并重启，跑完冒烟再改回 true。'
+    }
+} catch {
+    Write-Fail $_.Exception.Message
+}
+
 # ------------------------------------------------------------------ 2. 登录
 
 if (-not $Login -or -not $Password) {
@@ -200,7 +227,9 @@ if (-not $Login -or -not $Password) {
     Write-Step "登录（$Login）"
     $token = ''
     try {
-        $login = Invoke-Api -Method POST -Path '/auth/login' -Body @{ login = $Login; password = $Password }
+        $loginBody = @{ login = $Login; password = $Password }
+        if ($CaptchaPassToken) { $loginBody['captchaPassToken'] = $CaptchaPassToken }
+        $login = Invoke-Api -Method POST -Path '/auth/login' -Body $loginBody
         $token = $login.token
         Write-Ok "登录成功 userId=$($login.userId) role=$($login.role) mustChangePassword=$($login.mustChangePassword)"
         if ($login.mustChangePassword) {
@@ -208,7 +237,12 @@ if (-not $Login -or -not $Password) {
             Write-Info '请先调用 POST /auth/password 改密，或用已改密的账号重跑。'
         }
     } catch {
-        Write-Fail $_.Exception.Message
+        if ($_.Exception.Message -match '40105|40103') {
+            Write-Fail '登录需要人机验证（40105）：请传 -CaptchaPassToken，或临时设 CAPTCHA_ENABLED=false 后重启服务再跑'
+            Write-Info '说明见 docs/部署运维手册.md 的「人机验证」一节'
+        } else {
+            Write-Fail $_.Exception.Message
+        }
     }
 
     if ($token) {
@@ -351,9 +385,13 @@ if (-not $Login -or -not $Password) {
         Write-Step '上传：申请凭证 -> 直传 OSS -> 建立索引'
         $fileId = $null
         try {
-            $ticket = Invoke-Api -Method POST -Path '/oss/ticket' -Token $token -Body @{
+            $ticketBody = @{
                 name = $file.Name; size = $file.Length; contentType = 'text/plain'
             }
+            # 上传场景的人机验证凭证（题库启用时必需）。本项目不消费该凭证，
+            # 所以可以直接复用 -CaptchaPassToken 传进来的那一个。
+            if ($CaptchaPassToken) { $ticketBody['captchaPassToken'] = $CaptchaPassToken }
+            $ticket = Invoke-Api -Method POST -Path '/oss/ticket' -Token $token -Body $ticketBody
             Write-Ok "已签发凭证 objectKey=$($ticket.objectKey) partSize=$($ticket.partSize) partCount=$($ticket.partCount)"
 
             $put = Invoke-Api -Method POST -Path '/oss/put-url' -Token $token -Body @{
@@ -384,7 +422,12 @@ if (-not $Login -or -not $Password) {
                 Write-Fail "服务端记录大小($($commit.size)) 与本地($($file.Length)) 不一致"
             }
         } catch {
-            Write-Fail $_.Exception.Message
+            if ($_.Exception.Message -match '40105|40103') {
+                Write-Fail '申请上传凭证需要人机验证（40105）：请加 -CaptchaPassToken <凭证> 重跑'
+                Write-Info '（本项目不消费该凭证，登录与上传可以共用同一个）'
+            } else {
+                Write-Fail $_.Exception.Message
+            }
         }
 
         # ---------------------------------------------------------- 6. 幂等

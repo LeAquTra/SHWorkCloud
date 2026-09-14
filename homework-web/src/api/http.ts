@@ -26,6 +26,10 @@ export const CODE = {
   FILE_TOO_LARGE: 40082,
   UNAUTHORIZED: 40100,
   CAPTCHA_POOL_EMPTY: 40104,
+  /** 需要人机验证但没带凭证：前端应弹出验证码窗口后重试 */
+  CAPTCHA_REQUIRED: 40105,
+  /** 验证凭证无效 / 已被用过（注册场景的凭证是一次性的）：同样要重新验证 */
+  CAPTCHA_PASS_INVALID: 40103,
   TOO_FREQUENT: 40113,
   QUOTA_LIMITED: 40114,
   LOGIN_FAILED: 40116,

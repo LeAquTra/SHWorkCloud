@@ -1,4 +1,3 @@
-import axios from 'axios'
 import { get, post, put, del, getBlob } from './http'
 import type {
   AdminUpdateProfileReq,
@@ -13,6 +12,7 @@ import type {
   EmbeddedImagesVO,
   FileItemVO,
   FolderNodeVO,
+  HumanCheckVO,
   ImageItemVO,
   ImportResultVO,
   LoginVO,
@@ -37,7 +37,15 @@ import type {
 // ---------------------------------------------------------------- 认证
 
 export const authApi = {
-  login: (login: string, password: string) => post<LoginVO>('/auth/login', { login, password }),
+  /**
+   * 登录。
+   *
+   * @param captchaPassToken 人机验证凭证。是否需要见 {@link authApi.humanCheck}：
+   *   需要而没带（或凭证已失效）时服务端返回 40105，前端应弹出验证码窗口后重试。
+   */
+  login: (login: string, password: string, captchaPassToken?: string) =>
+    post<LoginVO>('/auth/login',
+      captchaPassToken ? { login, password, captchaPassToken } : { login, password }),
   logout: () => post<void>('/auth/logout'),
   changePassword: (oldPassword: string, newPassword: string, confirmPassword: string) =>
     post<void>('/auth/password', { oldPassword, newPassword, confirmPassword }),
@@ -46,25 +54,21 @@ export const authApi = {
   registerConfig: () => get<RegisterConfigVO>('/auth/register-config'),
 
   /**
-   * 取一道图片验证码。
-   *
-   * 对接指南写的是 `POST /auth/captcha`，而后端手册的 curl 示例是 GET。
-   * 这里先按 POST 发，遇到 404/405 再退回 GET —— 免得因为一个方法不一致，
-   * 把整条注册通道堵死。
+   * 公开接口：登录 / 注册 / 上传三个场景**此刻**是否需要人机验证。
+   * 返回的是生效值（后台题库为空时自动为 false），前端可以直接照着弹窗。
+   * 登录页在"还没有 token"时就要用它，所以它必须是公开接口。
    */
-  captcha: async (): Promise<CaptchaVO> => {
-    try {
-      return await post<CaptchaVO>('/auth/captcha', {})
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status
-        if (status === 404 || status === 405 || status === 400) {
-          return await get<CaptchaVO>('/auth/captcha')
-        }
-      }
-      throw error
-    }
-  },
+  humanCheck: () => get<HumanCheckVO>('/auth/human-check'),
+
+  /**
+   * 取一道图片验证码（**GET**，后端只映射了 GET）。
+   *
+   * <p>⚠️ 这里以前是"先按 POST 发，遇到 404/405 再退回 GET"的兜底写法，已经删掉：
+   * 后端对方法不匹配回的是 500（历史缺陷，现已改成 405），而兜底只认 404/405，
+   * 于是请求直接失败，用户看到的是"验证码加载失败"。
+   * 契约就是 `GET /auth/captcha`，不要再猜。
+   */
+  captcha: () => get<CaptchaVO>('/auth/captcha'),
 
   /** type=3 点选时用 clicks，坐标必须是**原图像素** */
   verifyCaptcha: (body: {
@@ -161,8 +165,13 @@ export const uploadApi = {
   config: () => get<UploadConfigVO>('/oss/upload-config'),
 
   /** 申请上传凭证：服务端确定 ObjectKey 并签发一次性 uploadToken */
-  ticket: (body: { name: string; size: number; contentType?: string }) =>
-    post<UploadTicketVO>('/oss/ticket', body),
+  ticket: (body: {
+    name: string
+    size: number
+    contentType?: string
+    /** 人机验证凭证；需要时缺失会返回 40105（见 authApi.humanCheck） */
+    captchaPassToken?: string
+  }) => post<UploadTicketVO>('/oss/ticket', body),
 
   /** 小文件单次 PUT 的预签名 URL；返回的 contentType 必须原样发送 */
   putUrl: (uploadToken: string, contentType?: string) =>

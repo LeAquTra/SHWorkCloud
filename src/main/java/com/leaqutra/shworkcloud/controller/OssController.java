@@ -97,9 +97,11 @@ public class OssController {
      * STS 临时凭证。
      * <p>返回的是 STS <b>临时</b>凭证与服务端签发的 uploadKey/uploadToken；
      * 服务端主 AK/SK 永远不会离开服务器。
+     * <p>⚠️ 与人机验证：这条路径同样受上传验证码约束（否则它就是绕开验证码的后门）。
+     * 需要时把 {@code captchaPassToken} 作为查询参数带上。
      */
     @GetMapping("/sts")
-    public R<FileVo.StsVo> sts() {
-        return R.ok(stsService.issueUploadToken());
+    public R<FileVo.StsVo> sts(@RequestParam(required = false) String captchaPassToken) {
+        return R.ok(stsService.issueUploadToken(captchaPassToken));
     }
 }

@@ -91,8 +91,21 @@
       />
     </template>
 
-    <el-empty v-else description="验证码加载失败">
-      <el-button type="primary" @click="load">重试</el-button>
+    <el-empty v-else :description="error || '验证码加载失败'">
+      <!--
+        ⚠️ 必须把**真实原因**显示在这里。以前这里写死"验证码加载失败"，
+        而具体错误（"题库为空"/"服务器内部错误"）只放在 data 分支的 alert 里 ——
+        加载失败时 data 是 null，那个 alert 根本不会渲染，
+        于是不管什么原因用户都只看到一句没有信息量的"验证码加载失败"。
+      -->
+      <template #description>
+        <p class="empty-title">{{ error || '验证码加载失败' }}</p>
+        <p v-if="poolEmpty" class="empty-hint">
+          后台题库里没有启用中的题目，请联系管理员在「验证码题库」里上传题目。
+        </p>
+        <p v-else class="empty-hint">可以点下面重试；若一直失败，请把这句话告诉管理员。</p>
+      </template>
+      <el-button type="primary" :loading="loading" @click="load">重试</el-button>
     </el-empty>
   </div>
 </template>
@@ -124,11 +137,15 @@ const error = ref('')
 const passToken = ref('')
 const verified = computed(() => passToken.value !== '')
 
+/** 题库为空：这不是"网络不好"，要明确告诉用户找管理员上传题目 */
+const poolEmpty = ref(false)
+
 const stageRef = ref<HTMLElement>()
 
 async function load() {
   loading.value = true
   error.value = ''
+  poolEmpty.value = false
   answer.value = ''
   clicks.value = []
   passToken.value = ''
@@ -137,7 +154,14 @@ async function load() {
     data.value = await authApi.captcha()
   } catch (err) {
     data.value = null
-    error.value = err instanceof ApiError ? err.message : '验证码加载失败，请稍后重试'
+    if (err instanceof ApiError) {
+      poolEmpty.value = err.code === CODE.CAPTCHA_POOL_EMPTY
+      error.value = poolEmpty.value ? '验证码题库为空' : err.message
+    } else {
+      // 非业务错误（网络中断、502、超时…）：axios 的 message 是英文的，
+      // 直接抛给用户没有意义，但也不能吞掉 —— 至少让他知道是网络侧问题
+      error.value = '验证码加载失败，请检查网络后重试'
+    }
   } finally {
     loading.value = false
   }
@@ -310,5 +334,19 @@ defineExpose({ refresh: load })
 
 .captcha-error {
   margin-top: 10px;
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--sc-text);
+  word-break: break-word;
+}
+
+.empty-hint {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--sc-text-3);
 }
 </style>

@@ -45,6 +45,8 @@ public class CaptchaService {
     private static final String PASS_KEY = "cap:pass:";
     private static final String USED_KEY = "cap:pass:used:";
     private static final String ENABLED_CACHE_KEY = "cap:enabled";
+    /** 通过一次人机验证后，该用户在上传场景的免验证窗口 */
+    private static final String UPLOAD_PASS_KEY = "cap:upload:ok:";
 
     private final CaptchaImageMapper captchaImageMapper;
     private final StringRedisTemplate redis;
@@ -284,6 +286,105 @@ public class CaptchaService {
                 || !Boolean.TRUE.equals(redis.delete(PASS_KEY + passToken))) {
             throw new BizException(ErrorCode.CAPTCHA_PASS_INVALID);
         }
+    }
+
+    // -------------------------------------------------- 三个场景的人机验证
+
+    /**
+     * 题库此刻是否可用（至少有一张启用中的题目）。
+     * <p>复用"启用题目"的 60 秒缓存，所以这个判断很便宜，可以直接放在登录路径上。
+     */
+    public boolean bankUsable() {
+        return !enabledWeights().isEmpty();
+    }
+
+    /**
+     * 该场景此刻是否<b>真的</b>要求人机验证。
+     * <p>注意"配置要求"与"真的要求"是两回事：题库为空时后者为 false（见 {@link CaptchaRules}）。
+     */
+    public boolean required(CaptchaRules.Scope scope) {
+        AppProperties.Captcha captcha = appProperties.getCaptcha();
+        boolean scopeEnabled = switch (scope) {
+            case LOGIN -> captcha.isRequireOnLogin();
+            case REGISTER -> captcha.isRequireOnRegister();
+            case UPLOAD -> captcha.isRequireOnUpload();
+        };
+        return CaptchaRules.required(captcha.isEnabled(), scopeEnabled, bankUsable());
+    }
+
+    /** 三个场景各自要不要验证码，供前端在动作之前就把窗口弹出来 */
+    public com.leaqutra.shworkcloud.vo.AuthVo.HumanCheckVo humanCheck() {
+        return new com.leaqutra.shworkcloud.vo.AuthVo.HumanCheckVo(
+                required(CaptchaRules.Scope.LOGIN),
+                required(CaptchaRules.Scope.REGISTER),
+                required(CaptchaRules.Scope.UPLOAD),
+                appProperties.getCaptcha().getSessionExpireSeconds());
+    }
+
+    /**
+     * 登录前的人机验证。
+     * <p>刻意<b>不消费</b> passToken：密码输错时不该逼用户再做一次验证码
+     * （token 自身 5 分钟过期，而暴力破解另有 IP+账号限流与失败锁定兜着）。
+     */
+    public void checkLoginPass(String passToken) {
+        if (!required(CaptchaRules.Scope.LOGIN)) {
+            return;
+        }
+        if (hasPassToken(passToken)) {
+            return;
+        }
+        throw new BizException(ErrorCode.CAPTCHA_REQUIRED);
+    }
+
+    /**
+     * 发注册邮件码前的人机验证。
+     * <p>这里必须<b>一次性消费</b>：否则同一个凭证能被反复用来刷邮件验证码。
+     */
+    public void checkRegisterPass(String passToken) {
+        if (!required(CaptchaRules.Scope.REGISTER)) {
+            return;
+        }
+        consumePassToken(passToken);
+    }
+
+    /**
+     * 申请上传凭证前的人机验证。
+     * <p>通过一次后开启"免验证窗口"：上传整个文件夹可能有几十个文件，
+     * 每个文件都过一次验证码是不可用的设计。
+     * <p>上传用的 passToken <b>不删除</b>（只校验存在性）：并发的多个文件会同时拿到
+     * 「需要人机验证」，其中一个消费掉 token 后，其余的就会因为 token 已被删除而失败。
+     * 让 token 随自身 TTL 自然过期、由免验证窗口接手，既没有竞争也不会削弱强度 ——
+     * 窗口本身就允许在 10 分钟内反复申请凭证。
+     */
+    public void checkUploadPass(Long userId, String passToken) {
+        if (!required(CaptchaRules.Scope.UPLOAD)) {
+            return;
+        }
+        if (hasUploadWindow(userId)) {
+            return;
+        }
+        if (hasPassToken(passToken)) {
+            openUploadWindow(userId);
+            return;
+        }
+        throw new BizException(ErrorCode.CAPTCHA_REQUIRED);
+    }
+
+    private boolean hasPassToken(String passToken) {
+        return StringUtils.hasText(passToken)
+                && Boolean.TRUE.equals(redis.hasKey(PASS_KEY + passToken));
+    }
+
+    private boolean hasUploadWindow(Long userId) {
+        return userId != null && Boolean.TRUE.equals(redis.hasKey(UPLOAD_PASS_KEY + userId));
+    }
+
+    private void openUploadWindow(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        long minutes = Math.max(1, appProperties.getCaptcha().getUploadPassMinutes());
+        redis.opsForValue().set(UPLOAD_PASS_KEY + userId, "1", Duration.ofMinutes(minutes));
     }
 
     /** 标记某邮箱已完成图片验证（5 分钟内可提交注册） */

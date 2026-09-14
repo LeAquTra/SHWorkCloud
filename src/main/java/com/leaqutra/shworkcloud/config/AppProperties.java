@@ -39,12 +39,11 @@ public class AppProperties {
         /** 自助注册开关；默认开启，用户可自行注册登录 */
         private boolean enabled = true;
 
-        /**
-         * 注册时是否强制先过图片验证码。
-         * <p>默认 false：图片验证码依赖后台先上传题库，而题库为空时注册会被整体挡住。
-         * 需要更强防机刷能力时再开启（并要求管理员先把题库维护起来）。
+        /*
+         * 说明：注册时的人机验证开关<b>不在这里</b>，而是统一放在 app.captcha 下
+         * （app.captcha.require-on-register）。三个场景（登录/注册/上传）的开关放在一起，
+         * 运维一眼就能看全"哪些动作要人机验证"。
          */
-        private boolean requireImageCaptcha = false;
 
         /**
          * 是否真正发送邮件。
@@ -120,6 +119,34 @@ public class AppProperties {
 
     @Data
     public static class Captcha {
+        /**
+         * 人机验证总开关。
+         * <p>关闭后<b>三个场景都不再要求</b>验证码。留这个开关是为了出事时能立刻放行
+         * （例如题库被误删、或验证码图片在 OSS 侧访问不了），而不必重新打包。
+         */
+        private boolean enabled = true;
+
+        /**
+         * 登录时要求人机验证。
+         * <p>⚠️ 即使这里是 true，<b>题库为空时也不会真的要求</b> ——
+         * 见 {@link com.leaqutra.shworkcloud.service.CaptchaRules#required}：
+         * 登录是机房的主路径，绝不能被一个人为可空的条件挡死。
+         */
+        private boolean requireOnLogin = true;
+
+        /** 自助注册"发送邮箱验证码"之前要求人机验证 */
+        private boolean requireOnRegister = true;
+
+        /** 申请上传凭证（上传文件）之前要求人机验证 */
+        private boolean requireOnUpload = true;
+
+        /**
+         * 通过一次人机验证后的"免验证窗口"（分钟）。
+         * <p>上传整文件夹可能有几十个文件，每个文件都要过一次验证码是不可用的设计；
+         * 通过一次后在窗口内不再打扰（见 {@code CaptchaService.checkUploadPass}）。
+         */
+        private int uploadPassMinutes = 10;
+
         private long imageUrlExpireSeconds = 300;
         private long sessionExpireSeconds = 300;
         private int maxFail = 3;

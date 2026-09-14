@@ -57,6 +57,7 @@ public class UploadTicketService {
     private final QuotaService quotaService;
     private final RateLimiter rateLimiter;
     private final LoginUser loginUser;
+    private final CaptchaService captchaService;
 
     // ---------------------------------------------------------------- 申请凭证
 
@@ -67,6 +68,11 @@ public class UploadTicketService {
      */
     public FileVo.UploadTicketVo issueTicket(OssDto.TicketReq req) {
         long userId = loginUser.id();
+        // 人机验证：通过一次后进入免验证窗口，整批上传只打扰一次。
+        // 放在最前面 —— 没过验证的请求不该消耗限流额度，也不必去查配额。
+        // 注意这一道闸门覆盖了整条直传链路：后续 put-url / multipart/* 都要求
+        // 由这里签发的 uploadToken，绕过它拿不到任何可用凭证。
+        captchaService.checkUploadPass(userId, req == null ? null : req.captchaPassToken());
         rateLimiter.checkStsIssue(userId);
 
         long size = req == null ? 0L : req.size();

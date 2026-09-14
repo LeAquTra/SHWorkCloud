@@ -10,8 +10,14 @@ public final class OssDto {
     private OssDto() {
     }
 
-    /** 申请上传凭证 */
-    public record TicketReq(String name, long size, String contentType) {
+    /**
+     * 申请上传凭证。
+     *
+     * @param captchaPassToken 人机验证凭证：需要时为必填（见 {@code GET /auth/human-check}），
+     *                         通过一次后服务端会开启免验证窗口，同一批上传不必反复验证。
+     *                         缺失或无效时返回 {@code 40105}。
+     */
+    public record TicketReq(String name, long size, String contentType, String captchaPassToken) {
     }
 
     /** 取单次 PUT 的预签名 URL（小文件）；contentType 会参与签名，客户端必须原样发送 */

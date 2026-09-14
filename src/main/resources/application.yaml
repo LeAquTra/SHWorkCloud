@@ -97,12 +97,14 @@ aliyun:
 app:
   register:
     enabled: true                        # 自助注册：用户可自行注册登录
-    # 图片验证码依赖后台先维护题库；题库为空时若强制要求会挡住所有注册，故默认不要求
-    require-image-captcha: false
+    # 注册发送邮箱验证码之前是否要求人机验证，统一放在 app.captcha 下：
+    #   app.captcha.enabled / app.captcha.require-on-register
     # 邮件验证码：false 时只写日志（仅限开发联调；prod 下启动会直接失败）
     mail-enabled: true
     email-pattern: '^\d{5,11}@qq\.com$'
-  import:
+  # ⚠️ 键名必须与 AppProperties 的字段名一致（studentImport → student-import）。
+  #    写成 app.import 不会报错，但配置会被静默忽略 —— 表现是"改了 default-password 没生效"。
+  student-import:
     strategy: skip                       # skip | update | fail
     default-password: ${IMPORT_DEFAULT_PASSWORD:}
     max-rows: 2000
@@ -123,7 +125,16 @@ app:
       archive: 104857600                 # 100MB
     # 上传整个文件夹时的总大小上限（客户端预检，见 GET /oss/upload-config）
     folder-max-total-bytes: 52428800     # 50MB
+  # 人机验证（图片验证码题库）。三个场景各自可开关，默认全开；
+  # ⚠️ 题库为空时（全新部署 / 题目被删光）服务端会自动降级为“不要求”，不会把登录挡死 ——
+  #    判定见 CaptchaRules.required()。
   captcha:
+    enabled: ${CAPTCHA_ENABLED:true}                 # 总开关，出事时可临时全关（不必重新打包）
+    require-on-login: ${CAPTCHA_REQUIRE_ON_LOGIN:true}       # 登录
+    require-on-register: ${CAPTCHA_REQUIRE_ON_REGISTER:true} # 注册发邮件码之前
+    require-on-upload: ${CAPTCHA_REQUIRE_ON_UPLOAD:true}     # 上传文件（申请凭证）
+    # 通过一次验证后的免验证窗口（分钟）：上传整个文件夹只打扰一次
+    upload-pass-minutes: 10
     image-url-expire-seconds: 300
     session-expire-seconds: 300
     max-fail: 3

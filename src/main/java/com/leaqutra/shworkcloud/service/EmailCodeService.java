@@ -22,13 +22,13 @@ import java.util.regex.Pattern;
 /**
  * 邮箱验证码（自助注册）。
  * <p>
- * 流程：{@code 发送验证码 -> 校验并消费 -> 注册}。图片验证码是否<b>必需</b>由
- * {@code app.register.require-image-captcha} 决定：
+ * 流程：{@code 发送验证码 -> 校验并消费 -> 注册}。发送之前是否要求<b>人机验证</b>由
+ * {@code app.captcha.require-on-register} 决定（总开关 {@code app.captcha.enabled}）：
  * <ul>
- *   <li><b>false（默认）</b>：只需邮箱验证码。全新部署时题库是空的，
- *       若强制要求图片验证码会把所有注册挡死，所以默认不要求。</li>
- *   <li><b>true</b>：必须先过图片验证码，并在发送邮件码时携带一次性
- *       {@code captchaPassToken}，适合公网开放注册、需要更强防机刷的场景。</li>
+ *   <li><b>要求时</b>：必须先过图片验证码，并在发送邮件码时携带一次性
+ *       {@code captchaPassToken}，适合公网开放注册、需要更强防机刷的场景；</li>
+ *   <li><b>题库为空时自动不要求</b>：图片验证码依赖后台题库，题库空时若强制要求
+ *       会把所有注册挡死（见 {@link CaptchaRules}）。</li>
  * </ul>
  * 限流按「IP + 账号」组合维度，避免机房全班共用一个出口 IP 时被整体限流。
  */
@@ -65,11 +65,9 @@ public class EmailCodeService {
         }
         requireQqEmail(email);
 
-        // 1) 按配置决定是否强制图片验证码
-        if (register.isRequireImageCaptcha()) {
-            // 一次性消费 passToken，防止绕过图片验证直接刷邮件
-            captchaService.consumePassToken(captchaPassToken);
-        }
+        // 1) 人机验证（题库为空时会自动不要求，见 CaptchaRules）：
+        //    通过则一次性消费 passToken，防止绕过验证直接刷邮件
+        captchaService.checkRegisterPass(captchaPassToken);
 
         // 2) 限流（内网来源不做 IP 维度计数）
         rateLimiter.checkEmailSend(email, clientIp);

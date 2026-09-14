@@ -39,10 +39,16 @@ public class StartupSafetyValidator implements InitializingBean {
                     ============================================================""");
         }
 
-        if (prod && !appProperties.getRegister().isRequireImageCaptcha()) {
+        if (prod && appProperties.getRegister().isEnabled()
+                && !appProperties.getCaptcha().isEnabled()) {
             log.warn("""
-                    自助注册已开启且未要求图片验证码（app.register.require-image-captcha=false）。
-                    公网环境建议开启图片验证码，否则容易被脚本批量注册。""");
+                    自助注册已开启但人机验证总开关被关闭（app.captcha.enabled=false）。
+                    公网环境建议保持开启，否则容易被脚本批量注册。""");
+        } else if (prod && appProperties.getRegister().isEnabled()
+                && !appProperties.getCaptcha().isRequireOnRegister()) {
+            log.warn("""
+                    自助注册已开启但注册环节未要求人机验证（app.captcha.require-on-register=false）。
+                    公网环境建议开启，否则容易被脚本批量注册。""");
         }
 
         if (prod && appProperties.getSecurity().isTrustProxy()) {

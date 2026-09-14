@@ -47,13 +47,19 @@ public class StsService {
     private final QuotaService quotaService;
     private final RateLimiter rateLimiter;
     private final LoginUser loginUser;
+    private final CaptchaService captchaService;
 
     /**
      * 签发上传凭证。
-     * <p>顺序：限流 -> 配额预检 -> 生成 Key/Token -> 落 Redis 与会话表 -> AssumeRole。
+     * <p>顺序：人机验证 -> 限流 -> 配额预检 -> 生成 Key/Token -> 落 Redis 与会话表 -> AssumeRole。
+     *
+     * @param captchaPassToken 人机验证凭证；需要时为必填，缺失返回 40105。
+     *                         这条路径<b>必须</b>和 {@code /oss/ticket} 一样校验，
+     *                         否则它就成了绕开上传验证码的后门。
      */
-    public FileVo.StsVo issueUploadToken() {
+    public FileVo.StsVo issueUploadToken(String captchaPassToken) {
         long userId = loginUser.id();
+        captchaService.checkUploadPass(userId, captchaPassToken);
         rateLimiter.checkStsIssue(userId);
 
         // 1) 配额预检：剩余空间连 1MB 都不到就没必要签发凭证了

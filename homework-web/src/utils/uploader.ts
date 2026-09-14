@@ -16,6 +16,48 @@ import type { CommitVO } from '@/types/api'
 
 export type UploadPhase = 'hashing' | 'uploading' | 'committing' | 'done' | 'failed' | 'paused'
 
+// ---------------------------------------------------------------- 人机验证闸门
+
+/**
+ * 上传前的人机验证闸门。
+ *
+ * <p>服务端在申请上传凭证时返回 `40105`（需要人机验证）就会调用它；
+ * 由**界面层**注入实现（弹一次验证码窗口 → 返回 `captchaPassToken`）。
+ * 这里刻意不直接依赖 UI 或 Pinia：uploader 是纯逻辑模块，
+ * 既能被批量上传队列复用，也能被将来的其它入口复用。
+ *
+ * @returns 凭证；`null` 表示用户取消（本次上传以 40105 失败，由调用方提示）
+ */
+export type UploadCaptchaGate = () => Promise<string | null>
+
+let captchaGate: UploadCaptchaGate | null = null
+
+export function setUploadCaptchaGate(gate: UploadCaptchaGate | null): void {
+  captchaGate = gate
+}
+
+/** 申请凭证；遇到「需要人机验证」时弹窗，拿到凭证后自动重试一次 */
+async function requestTicket(body: {
+  name: string
+  size: number
+  contentType?: string
+}): Promise<Awaited<ReturnType<typeof uploadApi.ticket>>> {
+  try {
+    return await uploadApi.ticket(body)
+  } catch (error) {
+    const needCaptcha = error instanceof ApiError
+      && (error.code === CODE.CAPTCHA_REQUIRED || error.code === CODE.CAPTCHA_PASS_INVALID)
+    if (!needCaptcha || !captchaGate) {
+      throw error
+    }
+    const passToken = await captchaGate()
+    if (!passToken) {
+      throw error
+    }
+    return await uploadApi.ticket({ ...body, captchaPassToken: passToken })
+  }
+}
+
 export interface UploadProgress {
   phase: UploadPhase
   percent: number
@@ -270,8 +312,8 @@ export async function uploadFile(args: UploadArgs): Promise<UploadResult> {
     }
   }
 
-  // ---- 3) 申请上传凭证（服务端确定 ObjectKey） ----
-  const ticket = await uploadApi.ticket({ name: file.name, size: total, contentType })
+  // ---- 3) 申请上传凭证（服务端确定 ObjectKey；需要时先过人机验证） ----
+  const ticket = await requestTicket({ name: file.name, size: total, contentType })
   if (ticket.maxFileSizeBytes > 0 && total > ticket.maxFileSizeBytes) {
     throw new ApiError(
       CODE.BAD_PARAM,

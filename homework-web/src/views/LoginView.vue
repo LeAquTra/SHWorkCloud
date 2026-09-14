@@ -19,7 +19,7 @@
           <span class="sc-gradient-text">存到云端</span>
         </h1>
         <p class="lede">
-          机房电脑关机就清空。上传到云盘后，换台机器、回家用手机，都能接着看、接着交。
+          机房电脑关机就清空? 上传到云盘吧!
         </p>
 
         <ul class="features">
@@ -37,7 +37,7 @@
       <section class="form-card">
         <header class="form-head">
           <h2>欢迎回来</h2>
-          <p class="sc-muted">用学号登录，首次登录会要求修改初始密码</p>
+          <p class="sc-muted">用学号登录时，首次登录会要求修改初始密码</p>
         </header>
 
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
@@ -45,7 +45,7 @@
             <el-input
               v-model="form.login"
               size="large"
-              placeholder="请输入学号"
+              placeholder="请输入学号 / 用户名"
               autocomplete="off"
               :prefix-icon="User"
               @keyup.enter="onSubmit"
@@ -81,7 +81,7 @@
           <el-button v-if="registerEnabled" link type="primary" @click="registerVisible = true">
             立即注册
           </el-button>
-          <span v-else class="sc-muted">请找任课老师重置</span>
+          <span v-else class="sc-muted">请找相关工作人员重置</span>
         </div>
 
         <div class="shared-tip">
@@ -116,12 +116,14 @@ import RegisterDialog from '@/components/RegisterDialog.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { authApi } from '@/api'
 import { ApiError, CODE } from '@/api/http'
+import { useHumanCheckStore } from '@/stores/humanCheck'
 import { useUserStore } from '@/stores/user'
-import type { RegisterConfigVO } from '@/types/api'
+import type { LoginVO, RegisterConfigVO } from '@/types/api'
 
 const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
+const humanCheck = useHumanCheckStore()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
@@ -134,13 +136,13 @@ const registerEnabled = computed(() => registerConfig.value?.registerEnabled ===
 const features = [
   {
     icon: UploadFilled,
-    title: '大文件断点续传',
+    title: '文件断点续传',
     desc: '分片直传 OSS，传一半断了可以接着传',
   },
   {
     icon: VideoCamera,
-    title: '在线阅览',
-    desc: '图片、PDF、视频、Office 正文直接在浏览器打开',
+    title: '支持大部分格式在线阅览',
+    desc: '图片、视频、Word 正文直接在浏览器打开',
   },
   {
     icon: Refresh,
@@ -150,7 +152,7 @@ const features = [
 ]
 
 const rules: FormRules = {
-  login: [{ required: true, message: '请输入学号', trigger: 'blur' }],
+  login: [{ required: true, message: '请输入学号 / 用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
@@ -164,7 +166,11 @@ async function onSubmit() {
   }
   loading.value = true
   try {
-    const vo = await authApi.login(form.login.trim(), form.password)
+    const vo = await doLogin()
+    if (!vo) {
+      // 用户取消了人机验证：不是错误，安静地停在登录页即可
+      return
+    }
     user.setSession(vo)
     // 登录后不留密码在内存里
     form.password = ''
@@ -182,7 +188,7 @@ async function onSubmit() {
       if (error.code === CODE.ACCOUNT_LOCKED) {
         ElMessage.error(error.message)
       } else if (error.code === CODE.ACCOUNT_DISABLED) {
-        ElMessage.error('账号已被禁用，请联系老师')
+        ElMessage.error('账号已被禁用，请联系相关工作人员')
       } else {
         ElMessage.error(error.message || '登录失败')
       }
@@ -191,6 +197,41 @@ async function onSubmit() {
     }
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 执行一次登录（最多两轮）。
+ *
+ * <p>人机验证放在最前面：后台题库启用了就得先过验证码。
+ * 但**不能只信页面加载时那份配置**（管理员可能刚上传了第一批题目），
+ * 所以真收到 `40105 / 40103` 时会再弹一次窗重试 ——
+ * 这也是唯一能保证"服务端要求什么、前端就做什么"的写法。
+ *
+ * @returns 登录结果；用户取消验证时返回 null
+ */
+async function doLogin(): Promise<LoginVO | null> {
+  const passToken = await humanCheck.ensure('login')
+  if (!passToken && (await humanCheck.required('login'))) {
+    ElMessage.info('需要完成人机验证才能登录')
+    return null
+  }
+
+  try {
+    return await authApi.login(form.login.trim(), form.password, passToken ?? undefined)
+  } catch (error) {
+    const needCaptcha = error instanceof ApiError
+      && (error.code === CODE.CAPTCHA_REQUIRED || error.code === CODE.CAPTCHA_PASS_INVALID)
+    if (!needCaptcha) {
+      throw error
+    }
+    // 服务端坚持要验证（例如题库刚被启用、或凭证已过期）→ 强制弹一次再试
+    const retryToken = await humanCheck.ensure('login', true)
+    if (!retryToken) {
+      ElMessage.info('需要完成人机验证才能登录')
+      return null
+    }
+    return await authApi.login(form.login.trim(), form.password, retryToken)
   }
 }
 

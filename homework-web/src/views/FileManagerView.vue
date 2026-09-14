@@ -287,6 +287,7 @@ import UploadPanel from '@/components/UploadPanel.vue'
 import { fileApi, uploadApi, userApi } from '@/api'
 import { ApiError } from '@/api/http'
 import { useIdleLogout } from '@/composables/useIdleLogout'
+import { useHumanCheckStore } from '@/stores/humanCheck'
 import { useUploadStore } from '@/stores/uploader'
 import { useUserStore } from '@/stores/user'
 import type { BreadcrumbVO, FileItemVO, FolderNodeVO, UploadConfigVO } from '@/types/api'
@@ -300,6 +301,7 @@ const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
 const uploadStore = useUploadStore()
+const humanCheck = useHumanCheckStore()
 const { warnVisible, secondsLeft, continueSession } = useIdleLogout()
 
 const categories = [
@@ -565,15 +567,26 @@ async function onFolderPicked(event: Event) {
  * 拖拽文件夹与 webkitdirectory 选择共用这一段逻辑。
  */
 async function enqueueWithTree(rows: { file: File; rel: string }[]) {
-  // 文件夹上传是"整包搬运"：单个文件都不大，但加一起很容易把机房共享带宽吃满，
-  // 所以在建目录/开始传之前先按总量拦一次。
-  // 上限由后端 /oss/upload-config 下发（app.upload.folder-max-total-bytes），前端不硬编码。
+  // 1) 先做本地预检（纯前端、不打扰用户）：文件夹上传是"整包搬运"，
+  //    单个文件都不大，但加一起很容易把机房共享带宽吃满，所以先按总量拦一次。
+  //    上限由后端 /oss/upload-config 下发（app.upload.folder-max-total-bytes），前端不硬编码。
   const totalBytes = rows.reduce((sum, row) => sum + row.file.size, 0)
   const folderLimit = uploadConfig.value.folderMaxTotalBytes || 0
   if (folderLimit > 0 && totalBytes > folderLimit) {
     ElMessage.error(
       `文件夹总大小 ${formatSize(totalBytes)} 超过上限 ${formatSize(folderLimit)}，请分批上传`,
     )
+    return
+  }
+
+  // 2) 人机验证：**在开始建目录/开始传之前**弹一次验证码。
+  //    放在这里而不是等每个文件申请凭证时弹，是因为申请凭证发生在指纹计算之后 ——
+  //    用户会先盯着进度条几秒钟、再突然被要求做验证码，体验很割裂。
+  //    通过一次后服务端会开启免验证窗口（app.captcha.upload-pass-minutes），
+  //    所以整批上传、乃至接下来几分钟内的再次上传都不会重复打扰。
+  const passToken = await humanCheck.ensure('upload')
+  if (!passToken && (await humanCheck.required('upload'))) {
+    ElMessage.info('需要完成人机验证才能上传')
     return
   }
 

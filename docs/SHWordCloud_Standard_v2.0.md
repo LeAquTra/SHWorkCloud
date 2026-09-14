@@ -1,4 +1,4 @@
-﻿# 作业云盘 SHWorkCloud 开发文档（v2.0 机房场景版）
+# 作业云盘 SHWorkCloud 开发文档（v2.0 机房场景版）
 
 > 版本：v2.0
 > 日期：2026-09-11
@@ -99,6 +99,7 @@
 | **v2.0** | **2026-09-11** | **技术栈对齐工程现状（Boot 4.1.1 + Sa-Token）；新增机房场景专项设计（第 3 章）与提交保障；账号体系改为"学号登录为主 + 名单批量导入"；修复 3 处数据契约缺陷（同级唯一约束、commit 幂等、objectKey 签发）；补齐非功能、测试、验收章节** | 评审修订 |
 | v2.1 | 2026-09-13 | 落地需求增补：自助注册开放（R1）、个性属性扩展、自定义头像上传 OSS、`GET /files/{id}/download` 流式下载、后台代改用户资料、验证码题库在线阅览、docx/pptx 内嵌图片、旧版 `.doc` 正文提取、OSS 强制 HTTPS、`sa-token-jackson` 排除等（逐条见 §0.6） | 实现同步 |
 | **v2.2** | **2026-09-14** | **四项优化：① PDF 不再提供在线预览（R19）；② 头像 24 小时冷却（R15 + `sys_user.avatar_updated_at`）；③ 站点图标（`favicon.svg` + `BrandMark`）；④ 公告功能（R20 + `announcement` 表 + 注意力分级）。另：docx/xlsx 服务端渲染结构化 HTML、压缩包/视频独立传输上限 + `GET /oss/upload-config`** | 实现同步 |
+| v2.3 | 2026-09-14 | **人机验证三场景（R21）**：后台验证码题库用于登录 / 注册发邮件码 / 上传；新增公开接口 `GET /auth/human-check`、统一开关 `app.captcha.*`、上传免验证窗口；**题库为空自动降级**（见 §4.10）。另：修正 `app.import`→`app.student-import` 配置键（原先被静默忽略） | 实现同步 |
 
 ### 0.3 相对 v1.1 的关键修正
 
@@ -204,6 +205,8 @@
 | **公告（注意力分级）** | 未提及 | 新增 `announcement` 表 + `AnnouncementService`（用户端只读生效列表）/ `AdminAnnouncementService`（超管增删改发撤）；分级 `1/2` 走可关横幅、`3` 走强制弹窗；已发布状态**禁止直接改/删**，必须先 `recall` | 需求：超管管理与发布/撤回公告，公告做注意力分级。`recall` 只改状态并保留 `publishTime`，便于事后追溯"谁在什么时候发过什么"；禁止直接改已发布公告，是因为公告带时间含义（"今晚 22:00 断网"），静默改内容等于篡改历史。后台列表带 `effective` 字段，避免"发了但没生效"扯皮。回归守卫：`AnnouncementRulesTest` |
 | **站点图标** | 未提及 | 新增 `homework-web/public/favicon.svg`（品牌渐变 + 云标识）与 `BrandMark.vue`，`index.html` 声明 `<link rel="icon" type="image/svg+xml">` | 之前标签页是浏览器默认的空白图标。用 SVG：一个文件覆盖所有 DPI，且与页头标识共享同一份几何定义；Vite 会把 `public/` 原样拷进 `dist/`，无需额外构建步骤 |
 | **压缩包 / 视频的独立传输上限** | 只有全局 `max-file-size-bytes` | 新增 `app.upload.transfer-limits.{video,archive}` 与 `app.upload.folder-max-total-bytes`，并通过 **`GET /oss/upload-config`** 下发给前端做上传前预检 | 前端不应硬编码上限数字（改配置就会出现两边不一致）。文件夹总大小上限挡的是"一次拖 200 个文件把出口带宽打满"；分类档位让"允许传 100MB 视频、但不允许传 100MB 的 zip"成为可配置项 |
+| **人机验证三场景** | 只有注册流程可选地要图片验证码（`app.register.require-image-captcha`，默认 false） | 三个场景统一到 `app.captcha.*`（`enabled` / `require-on-login` / `require-on-register` / `require-on-upload`），默认**全开**；新增公开接口 `GET /auth/human-check` 下发**生效值**；上传有免验证窗口；`/oss/sts` 同样受约束 | 需求：把后台验证码题库真正用起来（登录 / 注册发邮件 / 上传三处）。两个容易忽略的点：① **题库为空必须自动降级**，否则全新部署时登录会被永久挡死（用户无法完成验证）；② **`/oss/sts` 也要校验**，否则它就是绕开上传验证码的后门。回归守卫：`CaptchaRulesTest` |
+| **路由/协议异常不再伪装成 500** | 未提及 | 新增 `NoResourceFoundException`→404、`HttpRequestMethodNotSupportedException`→405、`HttpMediaTypeNotSupportedException`→415 的专门处理（新增错误码 40004/40005/40006） | 🔴 **真实故障**：前端早期把 `GET /auth/captcha` 误按 POST 调，本该回 405，却被 `Exception` 兜底成 **HTTP 500 + code 50000**；前端只对 404/405 做降级重试，于是直接失败，用户看到的是没有信息量的"验证码加载失败"，同时服务端日志被无意义的堆栈刷屏。回归守卫：`GlobalExceptionHandlerTest` |
 
 **尚未实现**：教师收作业闭环（§13）、前端全部代码、监控告警接入、备份恢复演练、
 60 并发压测，以及需要在 OSS 控制台手工配置的生命周期规则（§4.3）。
@@ -265,6 +268,7 @@ flowchart LR
 | R18 | **文件在线阅览** | 图片 / 视频 / 音频**流式预览**（支持 `Range`，视频可拖进度条）；文本与 **doc/docx/pptx/xlsx** **提取正文**在线阅读（`.doc` 走 OLE2 容器 + FIB/piece table，无需 `poi-scratchpad`），其中 **docx / xlsx 额外下发服务端渲染的结构化 HTML**（近似原格式，非像素级还原）；`viewType` 由服务端下发，前端不必自维护白名单。旧版 `.ppt` / `.xls` 仍为 `none`。**PDF 不提供在线预览**（见 R19） |
 | R19 | **PDF 不预览** | 需求方明确要求：PDF **点击表单项不弹窗、操作下拉框里删除"预览"**。实现为 `FileViewType.viewable("pdf")=false` → `previewable=false`、`preview-url` 返回 `40073`；`viewType` 仍为 `pdf`（文件图标与分类筛选用它），只保留下载入口 |
 | R20 | **公告（注意力分级）** | 超级管理员管理/发布/撤回公告；公告数据落库（表 `announcement`）。**注意力分级**决定打扰方式：`1` 普通 → 可关闭的顶部横幅；`2` 重要 → 警示色横幅；`3` 紧急 → **强制弹窗**（必须点"我已知晓"，不能用 Esc / 点遮罩绕过）。已发布的公告**必须先撤回才能修改**，避免用户正在看的公告被静默改内容 |
+| R21 | **人机验证（登录 / 注册 / 上传）** | 复用后台维护的图片验证码题库，在三处做人工验证：① 点登录；② 注册"发送邮箱验证码"之前；③ 上传文件（申请上传凭证）。校验通过签发 `captchaPassToken`。⚠️ **题库为空时自动降级为不要求**（否则会把所有人挡在门外且无法完成验证）；上传通过一次后有免验证窗口，整文件夹只打扰一次。详见 §4.10 |
 | R16 | **OSS 整洁性** | 删除文件/用户/头像/题目时同步删除 OSS 对象；每日对账清理无引用对象，保证 Bucket 不堆积垃圾 |
 | R8 | 上传可靠性 | 分片上传、断点续传（会话内）、失败分类提示、孤儿对象回收 |
 | R9 | 提交保障 | 两阶段进度反馈、提交凭证、离开页面拦截、下课倒计时提醒 |
@@ -320,6 +324,7 @@ flowchart LR
 | 容量对账重算 | ❌ | ❌ | ✅ | ✅ |
 | 验证码题库管理 | ❌ | ❌ | ✅ | ✅ |
 | **发布 / 撤回公告** | ❌ | ❌ | ❌ | ✅ |
+| **人机验证题库维护** | ❌ | ❌ | ✅ | ✅ |
 | 任命/撤销管理员 | ❌ | ❌ | ❌ | ✅ |
 | 删除账号 | ❌ | ❌ | ❌ | ✅ |
 | 运维对账 / 会话清场 | ❌ | ❌ | ❌ | ✅ |
@@ -1050,9 +1055,11 @@ sequenceDiagram
 
 ### 4.8 注册验证流程（可选通道）
 
-> **默认启用**（`app.register.enabled = true`）。图片验证码是否需要由
-> `app.register.require-image-captcha` 决定，**默认 `false`** ——
-> 图片验证码依赖管理员先维护题库，若强制要求会让「全新部署 + 题库为空」时注册全部失败。
+> **默认启用**（`app.register.enabled = true`）。是否要求图片验证码由
+> `app.captcha.require-on-register`（总开关 `app.captcha.enabled`）决定，**默认 `true`**；
+> 但**题库为空时会自动降级为不要求** ——
+> 否则「全新部署 + 题库为空」时注册与登录都会被挡死，而用户无法完成验证
+> （判定见 `CaptchaRules.required`，详见 §4.9）。
 
 整体为"**图片验证 → 发送邮件码 → 提交注册**"三步，任何一步失败都中断：
 
@@ -1073,8 +1080,10 @@ flowchart LR
 
 1. **仅 QQ 邮箱**：正则 `^\d{5,11}@qq\.com$`；如需 foxmail 别名，在配置 `app.register.email-pattern` 中放开；
 2. 图片验证码答案只存 Redis 会话（`cap:session:{captchaId}`），服务端比对；签名 URL 5 分钟过期；**单题最多错 3 次即作废重新出题**；
-3. 图片验证通过后签发**一次性、5 分钟有效**的 `captchaPassToken`（Redis `cap:pass:{token}`）；
-4. `POST /api/auth/email-code` 必须携带并**消费** `captchaPassToken`，防止绕过图片验证直接刷邮件；消费成功后写 `cap:pass:used:{email}`（5 分钟），作为"该邮箱已通过图片验证"的标记；
+3. 图片验证通过后签发**5 分钟有效**的 `captchaPassToken`（Redis `cap:pass:{token}`）。
+   **是否消费由场景决定**：注册发邮件码时**一次性消费**（防止绕过图片验证直接刷邮件）；
+   登录与上传只校验存在性（理由见 §4.10）；
+4. `POST /api/auth/email-code` 必须携带并**消费** `captchaPassToken`；消费成功后写 `cap:pass:used:{email}`（5 分钟），作为"该邮箱已通过图片验证"的标记；
 5. 邮箱验证码 6 位数字，Redis `reg:code:{email}`，有效期 10 分钟；频控按 §3.5（**内网豁免 IP 计数**）；
 6. **注册提交时**（🔴 修正 v1.1 的契约不一致）：
    - 请求体为 `{email, emailCode, password, username?}` —— **不再要求传 `captchaPassToken`**（它在发邮件码时已消费）；
@@ -1101,6 +1110,51 @@ flowchart LR
 - **答案绝不下发**：接口只返回签名图片 URL、`captchaId`、题型、宽高，以及**点选题的展示提示语**（不含坐标、不含正确顺序）；单选的选项标签可下发，但正确项不可；
 - **题库运营**：建议各题型启用题量 ≥ 50 张；`used_count` 辅助淘汰；**题库为空或全部停用时**，注册接口返回 `40104`，后台以醒目徽标提示管理员先上传题目；
 - **降级**：⚠️ 题库为空时**不得阻塞名单登录**（这正是 v2.0 把注册改为辅通道的原因之一）。
+
+### 4.10 人机验证的三个场景（登录 / 注册 / 上传）
+
+同一套题库、同一段前端逻辑，覆盖三个最容易被脚本化的动作：
+
+| 场景 | 拦的是什么 | 凭证传递 | 是否消费凭证 |
+|------|-----------|----------|:---:|
+| 登录 `POST /auth/login` | 撞库 / 密码喷洒 | 请求体 `captchaPassToken` | ❌ 不消费 |
+| 注册 `POST /auth/email-code` | 批量注册、刷邮件验证码 | 请求体 `captchaPassToken` | ✅ **一次性** |
+| 上传 `POST /oss/ticket`、`GET /oss/sts` | 滥用存储与出口带宽 | 请求体 / 查询参数 | ❌ 不消费（转免验证窗口） |
+
+**生效判定（三重与运算）**
+
+```
+required(scope) = app.captcha.enabled
+               && app.captcha.require-on-{login|register|upload}
+               && 题库里至少有一张启用中的题目
+```
+
+第三条是**安全护栏**，不是可选优化：题库是"人为可空"的数据。若"配置要求"直接等于"真的要求"，
+那么题库为空时（全新部署还没上传题目、或题目被误删）所有人都会被「请先完成人机验证」挡在门外，
+而用户**无法完成**验证 —— 等于把整个系统锁死。因此"题库不可用"必须自动降级为"不要求"
+（实现：`CaptchaRules.required`，回归守卫 `CaptchaRulesTest`）。
+
+**为什么登录/上传不消费凭证**
+
+- 登录：密码输错重试时不该逼用户重做一次验证码。凭证自身 5 分钟过期，
+  而暴力破解另有 IP+账号限流与失败锁定兜着，凭证的重放价值极低；
+- 上传：一次上传会**并发**申请多个凭证。若"谁先到谁消费"，其余请求就会因为凭证已被删除而失败，
+  表现为"整批上传随机失败"。让凭证随自身 TTL 自然过期、由免验证窗口接手，既无竞争也不削弱强度。
+
+**上传免验证窗口**
+
+整文件夹上传可能有几十个文件，每个都过一次验证码是不可用的设计：
+通过一次验证后写 `cap:upload:ok:{userId}`（TTL = `app.captcha.upload-pass-minutes`，默认 10 分钟），
+窗口内申请凭证不再要求验证码。安全性上并不弱化 —— 窗口本身就允许在 10 分钟内反复申请凭证。
+
+**前端契约（服务端权威）**
+
+`GET /api/auth/human-check`（**公开**，登录页在无 token 时就要用）：
+`{ login, register, upload, passTtlSeconds }`，三个布尔值都是**生效值**（已含上面的降级判定）。
+
+前端据此决定要不要弹窗；并且**收到 `40105`/`40103` 时必须能再弹一次并重试一次** ——
+配置可能在页面停留期间变化（管理员刚上传了第一批题目），只信页面加载时那份配置必然出现
+"明明题库启用了、前端却一直不弹窗"的诡异现象。
 
 ---
 
@@ -1775,8 +1829,7 @@ app:
   # ---------- 账号与导入 ----------
   register:
     enabled: true                   # 用户可自行注册登录
-    # 图片验证码依赖后台先维护题库；题库为空时若强制要求会挡住所有注册，故默认不要求
-    require-image-captcha: false
+    # 注册/登录/上传要不要人机验证，统一在下面的 app.captcha 下配置
     # 邮件验证码：false 时只写日志（仅限开发联调；prod 下启动会直接失败）
     mail-enabled: true
     email-pattern: '^\d{5,11}@qq\.com$'
@@ -4007,6 +4060,9 @@ CREATE TABLE submission (
 |------|------|:---:|
 | 0 | 成功 | 200 |
 | 40000 | 参数错误 | 400 |
+| 40004 | 接口不存在 | **404** |
+| 40005 | 请求方法不支持（message 里给出正确方法） | **405** |
+| 40006 | 请求 Content-Type 不支持 | **415** |
 | 40010 | 存储空间不足 | 200 |
 | 40020 | 同级目录下存在同名文件 | 200 |
 | 40030 | 父目录不存在或无权访问 | 200 |
@@ -4032,6 +4088,7 @@ CREATE TABLE submission (
 | 40102 | 图片验证码答案错误 | 200 |
 | 40103 | 图片验证凭证无效或已被使用 | 200 |
 | 40104 | 验证码题库为空或未启用 | 200 |
+| 40105 | 需要人机验证（未带 / 无效凭证） | 200 |
 | 40110 | 仅支持 QQ 邮箱注册 | 200 |
 | 40111 | 邮箱验证码错误 | 200 |
 | 40112 | 邮箱验证码已过期，请重新获取 | 200 |
@@ -4079,7 +4136,7 @@ CREATE TABLE submission (
 | `aliyun.sts.role-arn` | — | ✅ | RAM 角色 ARN |
 | `aliyun.sts.duration-seconds` | 1800 | — | STS 有效期 |
 | `app.register.enabled` | **true** | — | 自助注册开关；默认开启，用户可自行注册 |
-| `app.register.require-image-captcha` | false | — | 是否强制图片验证码（开启前需先维护题库） |
+| ~~`app.register.require-image-captcha`~~ | — | — | **已废弃**：合并到 `app.captcha.require-on-register`（三个场景的开关放在一起，运维一眼看全） |
 | `app.register.mail-enabled` | true | — | 是否真正发邮件；false 只写日志，**prod 下禁止** |
 | `app.register.email-pattern` | `^\d{5,11}@qq\.com$` | — | 允许注册的邮箱正则 |
 | `app.student-import.strategy` | `skip` | — | skip / update / fail |
@@ -4093,6 +4150,11 @@ CREATE TABLE submission (
 | `app.upload.transfer-limits.video` | 104857600 | — | 视频类单独上限（100MB）；经 `GET /oss/upload-config` 下发前端预检 |
 | `app.upload.transfer-limits.archive` | 104857600 | — | 压缩包单独上限（100MB）；其余后缀用全局 `max-file-size` |
 | `app.upload.folder-max-total-bytes` | 52428800 | — | 一次上传整个文件夹的总大小上限（50MB） |
+| `app.captcha.enabled` | true | — | 人机验证总开关（`CAPTCHA_ENABLED`）；关闭后三个场景都不再要求 |
+| `app.captcha.require-on-login` | true | — | 登录前要人机验证（题库为空时自动降级为不要求） |
+| `app.captcha.require-on-register` | true | — | 注册发送邮箱验证码之前要人机验证 |
+| `app.captcha.require-on-upload` | true | — | 上传文件（申请上传凭证）之前要人机验证 |
+| `app.captcha.upload-pass-minutes` | 10 | — | 通过一次人机验证后的上传免验证窗口（分钟） |
 | `app.captcha.image-url-expire-seconds` | 300 | — | 验证码图签名有效期 |
 | `app.captcha.max-fail` | 3 | — | 单题最多错误次数 |
 | `app.captcha.click-tolerance-px` | 30 | — | 点选容差（原图坐标） |

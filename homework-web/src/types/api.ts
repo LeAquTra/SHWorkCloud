@@ -35,11 +35,34 @@ export interface LoginVO {
 /** `GET /auth/register-config`：决定登录页要不要显示注册入口、要不要图片验证码 */
 export interface RegisterConfigVO {
   registerEnabled: boolean
+  /**
+   * 注册「发送邮箱验证码」之前是否需要图片验证码。
+   * ⚠️ 这是**生效值**：配置开着但题库为空时是 `false`。
+   * 新代码更推荐直接用 `humanCheck()` 的 `register` 字段 —— 三个场景口径统一。
+   */
   requireImageCaptcha: boolean
   mailEnabled: boolean
   /** 后端的 Java 正则，前端拿来做即时校验；用 try/catch 包住，避免个别语法不兼容 */
   emailPattern: string
   mailHint: string | null
+}
+
+/**
+ * `GET /auth/human-check`：人机验证（后台图片验证码题库）在三个场景下是否**生效**。
+ *
+ * ⚠️ 这三个值是**生效值**，不只是配置值：后台题库为空（全新部署 / 题目被删光）时
+ * 服务端会自动降级为 false —— 否则所有人都会被「请先完成人机验证」挡在门外，
+ * 而用户根本没法完成验证。前端直接按它决定要不要弹验证码窗口即可。
+ */
+export interface HumanCheckVO {
+  /** 登录时是否需要人机验证 */
+  login: boolean
+  /** 注册「发送邮箱验证码」之前是否需要 */
+  register: boolean
+  /** 申请上传凭证（上传文件）之前是否需要 */
+  upload: boolean
+  /** 通过验证后凭证的有效秒数 */
+  passTtlSeconds: number
 }
 
 export interface CaptchaVO {

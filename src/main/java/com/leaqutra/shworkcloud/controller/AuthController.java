@@ -5,6 +5,7 @@ import com.leaqutra.shworkcloud.config.AppProperties;
 import com.leaqutra.shworkcloud.dto.AuthDto;
 import com.leaqutra.shworkcloud.security.ClientIpUtil;
 import com.leaqutra.shworkcloud.service.AuthService;
+import com.leaqutra.shworkcloud.service.CaptchaRules;
 import com.leaqutra.shworkcloud.service.CaptchaService;
 import com.leaqutra.shworkcloud.service.EmailCodeService;
 import com.leaqutra.shworkcloud.vo.AuthVo;
@@ -70,13 +71,25 @@ public class AuthController {
                         : "服务端处于开发模式（mail-enabled=false），验证码只写服务端日志";
         return R.ok(new AuthVo.RegisterConfigVo(
                 register.isEnabled(),
-                register.isRequireImageCaptcha(),
+                // 这里给的是**生效值**：题库为空时会自动变成 false，
+                // 前端据此决定要不要弹验证码窗口（详见 CaptchaRules）
+                captchaService.required(CaptchaRules.Scope.REGISTER),
                 register.isMailEnabled(),
                 register.getEmailPattern(),
                 hint));
     }
 
-    /** 获取图片验证码（仅当 requireImageCaptcha=true 时需要；题库为空时返回 40104） */
+    /**
+     * 人机验证配置（公开接口）。
+     * <p>登录页在<b>用户还没登录时</b>就需要知道"点登录要不要先弹验证码"，
+     * 所以这个接口必须公开。三个值都是生效值（题库为空自动为 false）。
+     */
+    @GetMapping("/human-check")
+    public R<AuthVo.HumanCheckVo> humanCheck() {
+        return R.ok(captchaService.humanCheck());
+    }
+
+    /** 获取图片验证码（题库为空时返回 40104） */
     @GetMapping("/captcha")
     public R<CaptchaVo.CaptchaVoBody> captcha(HttpServletRequest request) {
         return R.ok(captchaService.issue(clientIpUtil.get(request)));

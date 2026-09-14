@@ -9,11 +9,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理。
@@ -81,6 +84,49 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<R<Void>> handleUploadSize(MaxUploadSizeExceededException e) {
         return ResponseEntity.ok(R.fail(ErrorCode.FILE_TOO_LARGE, "上传文件超出服务端限制"));
+    }
+
+    // ------------------------------------------------- 路由与协议（不是服务端故障！）
+
+    /*
+     * 这一组必须单独处理，否则会掉进下面的 Exception 兜底 → HTTP 500 + code 50000，
+     * 让"接口写错了"看起来像"服务器崩了"。
+     *
+     * 真实踩过的坑：前端早期把 GET /auth/captcha 误按 POST 调，
+     * 本该回 405，结果回了 500「服务器内部错误」：
+     *   ① 前端只对 404/405 做降级重试，于是直接失败，用户看到"验证码加载失败"；
+     *   ② 服务端日志被一条无意义的堆栈刷屏，排查方向被带偏。
+     */
+
+    /** 路径没有匹配的接口（多为前端拼错地址、或后端与前端版本不一致） */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<R<Void>> handleNoResource(NoResourceFoundException e) {
+        log.warn("接口不存在 uri={} method={}", e.getResourcePath(), e.getHttpMethod());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(R.fail(ErrorCode.NOT_FOUND, "接口不存在：" + e.getResourcePath()));
+    }
+
+    /** 方法不匹配（GET 的接口被 POST 调等）。message 里带上正确方法，省一次来回 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<R<Void>> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        String supported = e.getSupportedHttpMethods() == null ? ""
+                : e.getSupportedHttpMethods().stream().map(String::valueOf)
+                        .collect(java.util.stream.Collectors.joining("/"));
+        log.warn("请求方法不被支持 method={} supported={}", e.getMethod(), supported);
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(R.fail(ErrorCode.METHOD_NOT_ALLOWED,
+                        supported.isEmpty()
+                                ? "请求方法 " + e.getMethod() + " 不被支持"
+                                : "该接口只支持 " + supported + "，请勿用 " + e.getMethod() + " 调用"));
+    }
+
+    /** 请求体类型不对（该传 JSON 却传了表单等） */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<R<Void>> handleMediaType(HttpMediaTypeNotSupportedException e) {
+        log.warn("请求内容类型不被支持 contentType={}", e.getContentType());
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(R.fail(ErrorCode.UNSUPPORTED_MEDIA_TYPE,
+                        "请求 Content-Type 不被支持：" + e.getContentType()));
     }
 
     // ---------------------------------------------------------------- 兜底

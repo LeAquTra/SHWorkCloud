@@ -53,6 +53,9 @@ public class AuthService {
         if (!StringUtils.hasText(loginName) || !StringUtils.hasText(req.password())) {
             throw new BizException(ErrorCode.BAD_PARAM, "请填写账号与密码");
         }
+        // 人机验证放在最前面：没过验证的请求连密码都不必比对，
+        // 也就不会因为"密码错误"去累加某个学生的失败次数（避免被用来锁别人账号）
+        captchaService.checkLoginPass(req.captchaPassToken());
         rateLimiter.checkLogin(loginName, clientIp);
 
         SysUser user = userMapper.selectByLogin(loginName);

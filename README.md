@@ -1,4 +1,4 @@
-﻿# SHWorkCloud 作业云盘
+# SHWorkCloud 作业云盘
 
 学生机房课堂文件保存系统：学生在机房电脑上把文件存进自己的网盘，教师课前批量开号、课后管理账号。
 
@@ -76,13 +76,14 @@ mvn spring-boot:run
 1. 用超管登录 → 修改密码
 2. **两种开户方式，任选或都用**：
    - **用户自助注册**（默认已开启）：QQ 邮箱收验证码 → `POST /api/auth/register`；
-     默认**不要求图片验证码**，所以全新部署、题库为空时也能注册。
-     若要更强防机刷，把 `app.register.require-image-captcha` 设为 `true`
-     并先在题库里上传题目（题库为空时会被 40104 挡住）。
    - **名单导入**（机房批量开户）：进「名单导入」下载 CSV 模板 → 填学号/姓名/班级 → 导入，
      学生用「学号 + 初始密码」登录，首次登录强制改密。
-3. 学生登录后可自行修改**个性属性**（昵称/头像/签名/性别/生日）
-4. 上传与下载：`POST /api/oss/ticket` → 直传 OSS → `POST /api/files/commit`；
+3. **人机验证**（登录 / 注册发邮件码 / 上传三处，用的是后台的验证码题库）：
+   默认三个场景都开，但**题库为空时会自动降级为不要求** ——
+   所以全新部署时登录、上传一切照旧，**上传题目后验证码才真正生效**。
+   紧急情况下可用 `CAPTCHA_ENABLED=false` 一键全关（改 env 重启即可，不必重新打包）。
+4. 学生登录后可自行修改**个性属性**（昵称/头像/签名/性别/生日），头像每 24 小时限改一次
+5. 上传与下载：`POST /api/oss/ticket` → 直传 OSS → `POST /api/files/commit`；
    下载用 `GET /api/files/{id}/download`（支持断点续传）
 
 ---
@@ -216,10 +217,13 @@ SHWorkCloud/
 
 | 模块 | 接口 | 说明 |
 |------|------|------|
-| 认证 | `POST /api/auth/login` | 学号/用户名 + 密码 |
+| 认证 | `POST /api/auth/login` | 学号/用户名 + 密码；题库启用时需 `captchaPassToken`（40105 即"请先完成人机验证"） |
+| 认证 | `GET /api/auth/human-check` | **公开**：登录 / 注册 / 上传三处此刻是否需要人机验证（生效值） |
 | 认证 | `POST /api/auth/logout` | 退出 |
 | 认证 | `POST /api/auth/password` | 改密（首登强制也走这里） |
-| 上传 | `GET /api/oss/sts` | 签发 STS 临时凭证 + 服务端 uploadKey/uploadToken |
+| 人机验证 | `GET /api/auth/captcha`、`POST /api/auth/captcha/verify` | 出题 / 作答；通过后拿 5 分钟有效的 `captchaPassToken` |
+| 上传 | `GET /api/oss/sts` | 签发 STS 临时凭证 + 服务端 uploadKey/uploadToken（同样受人机验证约束） |
+| 上传 | `POST /api/oss/ticket` | 申请上传凭证；题库启用时需 `captchaPassToken`，通过一次后有 10 分钟免验证窗口 |
 | 上传 | `POST /api/files/instant-upload` | 尝试秒传 |
 | 上传 | `POST /api/files/commit` | 直传完成后建索引（**幂等**） |
 | 文件 | `GET /api/files` | 目录列表 / 分类 / 前缀搜索 |
@@ -279,6 +283,8 @@ SHWorkCloud/
 | **自定义头像** | `avatar` 是文本 URL 字段 | 改为服务端上传 OSS，DB 存 `avatar_key`；**每 24 小时限改一次**（`avatar_updated_at` + `avatarChangeableAt`） | 需求：仅 JPG/PNG、≤5MB、存 OSS；换头像要能删掉旧对象；限制频率是为了防"拿头像当免费图床反复刷图" |
 | **PDF 不预览** | viewType=pdf 时用浏览器阅读器打开 | `FileViewType.viewable()` 对 pdf 返回 false → `previewable=false`、`preview-url` 返回 40073 | 需求方明确要求：点击表单项不弹窗、操作下拉框里删掉"预览"。注意 `viewType` 仍是 `pdf`（图标与分类要用） |
 | **公告** | 无 | 新表 `announcement` + 注意力分级（1 普通 / 2 重要 → 可关横幅；3 紧急 → 强制弹窗）；已发布必须先撤回才能改 | 需求：超管管理/发布/撤回公告，公告做注意力分级。禁止直接改已发布公告是为了避免"用户正在看的公告被静默改内容" |
+| **人机验证三场景** | 只有注册可选地要图片验证码（`app.register.require-image-captcha`，默认 false） | 统一到 `app.captcha.*`（总开关 + 三个场景开关），默认**全开**；新增公开接口 `GET /auth/human-check` 下发**生效值**；上传有 10 分钟免验证窗口；`/oss/sts` 同样校验 | 需求：把后台验证码题库真正用起来。两个关键点：① **题库为空必须自动降级**，否则全新部署时登录会被永久挡死（用户无法完成验证）；② **`/oss/sts` 也要校验**，否则它就是绕开上传验证码的后门 |
+| **修正 `app.import` 配置键** | `application.yaml` 里写的是 `app.import.*` | 改为 `app.student-import.*`（与 `AppProperties.StudentImport` 字段名一致） | 🔴 真实缺陷：键名写错**不会报错**，Spring 只是静默忽略 —— 表现是"设了 `IMPORT_DEFAULT_PASSWORD` 却没生效，导入的学生拿不到初始密码" |
 | **删除即清 OSS** | 仅彻底删除才删 OSS | `app.recycle.enabled=false` 时删除即彻底删除；删用户/头像/题目也删 OSS | 需求：保证 OSS 容器整洁 |
 | **OSS 对账** | 无 | 每日扫 `homework/`、`avatar/`、`captcha/` 清理无引用对象（24h 宽限） | 远程删除可能失败，需要兜底 |
 | **排除 `sa-token-jackson`** | 未提及 | pom 里 `exclude` 掉 Sa-Token 带来的 `sa-token-jackson`，并自建 `SaTokenJsonConfig` 注入基于 **Jackson 3** 的 `SaJsonTemplate` | 🔴 **真实故障**：Sa-Token 1.45 会扫描所有 jar 的 `META-INF/satoken/` 并立即 install 插件，`sa-token-jackson` 的 `install()` 引用 **Jackson 2** 的 `PolymorphicTypeValidator`，而 Boot 4 只有 **Jackson 3**（`tools.jackson`）→ `NoClassDefFoundError` → **应用启动即崩、systemd 无限重启**。Sa-Token 对插件异常 fail-fast，不跳过坏插件，只能排除依赖。回归守卫：`SaTokenStackTest` |
@@ -319,6 +325,9 @@ curl -X POST "http://localhost:8081/api/admin/ops/oss-reconcile?dryRun=false" -H
 - 公告的"已读"状态存在前端（`sessionStorage`），后端**不记录谁读过哪条** ——
   公告是广播（如"今晚断电维护"），需要 per-user 送达确认的话得另外建表；
 - 头像冷却 24 小时是**硬编码常量**（`AvatarRules.CHANGE_INTERVAL_HOURS`），要调整得重新打包；
+- **单用户每小时最多申请 120 次上传凭证**（`RateLimiter.STS_HOUR_LIMIT`）：
+  一次上传 120 个以上文件的文件夹会被 `40114 发送次数超限` 拦住，需要分批上传或调大该常量；
+  人机验证的免验证窗口（10 分钟）与这个限制是两回事，别混淆；
 - 搜索为**前缀匹配**（`LIKE 'x%'`）；全模糊匹配需要 FULLTEXT(ngram) 或 ES；
 - 教师收作业闭环（班级/作业/提交/批改）属**第二阶段**，文档 §13 已给出模型与预留字段；
 - 集成测试需真实 MySQL/Redis/OSS：

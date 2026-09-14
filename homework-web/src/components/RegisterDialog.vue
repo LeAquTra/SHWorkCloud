@@ -59,8 +59,11 @@
         <div v-if="config?.mailHint" class="hint">{{ config.mailHint }}</div>
       </el-form-item>
 
-      <ImageCaptcha v-if="config?.requireImageCaptcha" ref="captchaRef" @update:pass-token="onPassToken" />
-
+      <!--
+        人机验证不在这里内嵌，而是点「发送邮箱验证码」时弹出独立的验证码窗口
+        （HumanCheckDialog，挂在 App.vue 上）。原因：这个弹窗要在登录、注册、上传
+        三处复用，而且同一时刻只能存在一个；内嵌一份等于同时维护三份实现。
+      -->
       <el-button
         type="primary"
         size="large"
@@ -141,20 +144,20 @@
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Message, UserFilled } from '@element-plus/icons-vue'
-import ImageCaptcha from '@/components/ImageCaptcha.vue'
 import { authApi } from '@/api'
 import { ApiError, CODE } from '@/api/http'
+import { useHumanCheckStore } from '@/stores/humanCheck'
 import type { RegisterConfigVO } from '@/types/api'
 
 /**
  * 自助注册弹窗。
  *
- * <p>流程由 `GET /auth/register-config` 决定：
- *   requireImageCaptcha=false（默认）→ 邮箱验证码 → 注册
- *   requireImageCaptcha=true        → 图片验证码 → 邮箱验证码 → 注册
+ * <p>流程：邮箱 →（需要时先过**人机验证弹窗**）→ 邮箱验证码 → 设置密码 → 注册。
+ * 是否要人机验证由 `GET /auth/human-check` 的 `register` 决定（后台题库为空时服务端会自动不要求）。
  *
  * <p>⚠️ captchaPassToken 在"发邮件码"时被服务端一次性消费，
- * 所以**注册提交里不再带它**（对接指南 §3.2 专门强调过这一点）。
+ * 所以**注册提交里不再带它**，且每次重发邮件码都要重新验证一次
+ * （见对接指南 §3.2）。
  */
 
 const props = defineProps<{
@@ -170,11 +173,10 @@ const emit = defineEmits<{
 const step = ref<1 | 2>(1)
 const emailFormRef = ref<FormInstance>()
 const formRef = ref<FormInstance>()
-const captchaRef = ref<InstanceType<typeof ImageCaptcha>>()
 const sending = ref(false)
 const submitting = ref(false)
 const countdown = ref(0)
-const captchaPassToken = ref('')
+const humanCheck = useHumanCheckStore()
 
 let timer: number | undefined
 
@@ -309,26 +311,22 @@ async function sendCode() {
       return
     }
   }
-  if (props.config?.requireImageCaptcha && !captchaPassToken.value) {
-    // passToken 是一次性的：重发邮件码必须重新过一遍图片验证
-    if (step.value === 2) {
-      step.value = 1
-      ElMessage.warning('重新发送需要先完成图片验证码')
-    } else {
-      ElMessage.warning('请先完成图片验证码')
-    }
+
+  // 人机验证：先清掉本地缓存再取新凭证 —— 这个凭证是**一次性**的，
+  // 上一次发送已经把它消费掉了，复用必然被服务端拒（CAPTCHA_PASS_INVALID）。
+  // 注意这里**不能**用 force=true：题库为空 / 未开启时服务端并不要求，
+  // 强弹一个空题库的弹窗会让用户既看不懂也过不去。
+  const passToken = await issuePassToken()
+  if (passToken === undefined) {
     return
   }
 
   sending.value = true
   try {
-    await authApi.sendEmailCode(form.email.trim(), captchaPassToken.value || undefined)
+    await sendWithRetry(passToken)
     ElMessage.success('验证码已发送，请到邮箱查收')
     startCountdown()
     step.value = 2
-    // passToken 已被一次性消费，重新回到第一步时必须换一张新题
-    captchaPassToken.value = ''
-    captchaRef.value?.refresh()
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.code === CODE.TOO_FREQUENT) {
@@ -343,6 +341,42 @@ async function sendCode() {
     }
   } finally {
     sending.value = false
+  }
+}
+
+/**
+ * 取一个用于本次发送的验证码凭证。
+ *
+ * @returns 凭证（不需要人机验证时为 null）；`undefined` 表示用户取消了验证，调用方应中止
+ */
+async function issuePassToken(): Promise<string | null | undefined> {
+  humanCheck.clearToken()
+  const token = await humanCheck.ensure('register')
+  if (!token && (await humanCheck.required('register'))) {
+    ElMessage.info('需要完成人机验证才能发送验证码')
+    return undefined
+  }
+  return token
+}
+
+/** 发送邮件码；服务端坚持要人机验证时强制弹一次窗再重试 */
+async function sendWithRetry(passToken: string | null): Promise<void> {
+  const email = form.email.trim()
+  try {
+    await authApi.sendEmailCode(email, passToken ?? undefined)
+  } catch (error) {
+    const needCaptcha = error instanceof ApiError
+      && (error.code === CODE.CAPTCHA_REQUIRED || error.code === CODE.CAPTCHA_PASS_INVALID)
+    if (!needCaptcha) {
+      throw error
+    }
+    // 配置可能在页面停留期间变了（管理员刚上传了第一批题目）→ 强制弹一次再试
+    humanCheck.clearToken()
+    const retryToken = await humanCheck.ensure('register', true)
+    if (!retryToken) {
+      throw error
+    }
+    await authApi.sendEmailCode(email, retryToken)
   }
 }
 
@@ -387,7 +421,8 @@ function onVisibleChange(visible: boolean) {
     window.clearInterval(timer)
     countdown.value = 0
     step.value = 1
-    captchaPassToken.value = ''
+    // 关掉弹窗就把未用掉的凭证清掉：它是一次性的，留着只会误导下一次发送
+    humanCheck.clearToken()
   }
   emit('update:modelValue', visible)
 }

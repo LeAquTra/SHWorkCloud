@@ -45,4 +45,18 @@ public final class AuthVo {
                                    boolean mailEnabled, String emailPattern,
                                    String mailHint) {
     }
+
+    /**
+     * 人机验证配置（{@code GET /auth/human-check}，公开接口）。
+     * <p>三个布尔值是<b>生效值</b>而不只是配置值：后台题库为空时会自动变成 false，
+     * 所以前端可以直接按它决定"要不要弹验证码窗口"，不必自己猜。
+     *
+     * @param login          登录时是否需要人机验证
+     * @param register       注册"发送邮箱验证码"之前是否需要
+     * @param upload         申请上传凭证（上传文件）之前是否需要
+     * @param passTtlSeconds 通过验证后凭证的有效秒数（同时也是"上传免验证窗口"的参考时长）
+     */
+    public record HumanCheckVo(boolean login, boolean register, boolean upload,
+                               long passTtlSeconds) {
+    }
 }

@@ -13,8 +13,14 @@ public final class AuthDto {
     private AuthDto() {
     }
 
-    /** 登录：学生直接用学号 */
-    public record LoginReq(String login, String password) {
+    /**
+     * 登录：学生直接用学号。
+     *
+     * @param captchaPassToken 人机验证通过后的凭证；不需要验证码的场景可以不传
+     *                         （是否真的需要见 {@code GET /auth/human-check}）。
+     *                         缺失或无效时服务端返回 {@code 40105}，前端应弹出验证码窗口后重试。
+     */
+    public record LoginReq(String login, String password, String captchaPassToken) {
     }
 
     /** 修改密码（首登强制改密也走这个接口） */

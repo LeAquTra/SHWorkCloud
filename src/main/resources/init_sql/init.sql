@@ -146,8 +146,9 @@ CREATE TABLE IF NOT EXISTS `upload_session` (
 -- ---------------------------------------------------------------------------
 -- 图片实体在 OSS 的 captcha/ 前缀（该前缀不对普通用户 STS 开放），
 -- 答案与坐标标注只存本表，出题接口绝不下发答案。
--- 注意：自助注册默认不要求图片验证码（app.register.require-image-captcha=false），
--- 本表为空不影响用户注册。
+-- 本表同时供"人机验证"使用（登录 / 注册发邮件码 / 上传文件三处，见 app.captcha.*）。
+-- ⚠️ 本表为空时服务端会**自动不要求**人机验证 —— 否则全新部署时
+--    登录与上传会被永久挡死，而用户无法完成验证（判定见 CaptchaRules.required）。
 CREATE TABLE IF NOT EXISTS `captcha_image` (
   `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '题目ID',
   `type`        TINYINT       NOT NULL COMMENT '题型：1字符输入 2单选 3点选',
