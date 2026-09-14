@@ -80,8 +80,13 @@ public interface UserMapper extends BaseMapper<SysUser> {
                        @Param("loginTime") LocalDateTime loginTime,
                        @Param("ip") String ip);
 
-    /** 更新头像 ObjectKey（null 表示清除头像） */
-    @Update("UPDATE sys_user SET avatar_key = #{avatarKey} WHERE id = #{id} AND deleted = 0")
+    /**
+     * 更新头像 ObjectKey（null 表示清除头像），同时记录本次修改时间。
+     * <p>时间用服务端的 {@code NOW()}，不依赖应用与数据库的时钟一致；
+     * <b>清除也计入冷却</b> —— 否则"换了立刻清掉再换"就绕过了 24 小时限制。
+     */
+    @Update("UPDATE sys_user SET avatar_key = #{avatarKey}, avatar_updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted = 0")
     int updateAvatar(@Param("id") Long id, @Param("avatarKey") String avatarKey);
 
     /** 名单导入 update 策略：只更新姓名/班级/配额，不动密码与文件 */

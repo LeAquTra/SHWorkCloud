@@ -463,7 +463,8 @@ public class FileService {
         long userId = loginUser.id();
         FileEntry entry = support.requireFile(userId, id);
         if (!FileNaming.previewable(entry.getSuffix())) {
-            // 只允许图片与 PDF：若把 html/svg 内联，等于在自己的域名下执行脚本
+            // 只允许可安全内联的类型（图片/视频/音频/文本/Office 正文提取）；
+            // pdf 已按需求排除，html/svg 也绝不允许内联——否则等于在自己的域名下执行脚本
             throw new BizException(ErrorCode.PREVIEW_NOT_SUPPORTED);
         }
         // 用普通签名 URL（不带 response-* 覆盖）：头像/相册/验证码/缩略图都走这条，
@@ -572,7 +573,8 @@ public class FileService {
 
     /**
      * 在线阅览文本 / Office 正文。
-     * <p>文本类会自动处理 GBK 与 UTF-8 BOM；doc/docx/pptx 会提取纯文本（排版会丢失）。
+     * <p>文本类会自动处理 GBK 与 UTF-8 BOM；doc/docx/pptx/xlsx 会提取纯文本（排版会丢失），
+     * docx / xlsx 还会带一份服务端渲染的结构化 {@code html}（近似原格式，非像素级还原）。
      * 超过上限的文件拒绝在线阅览并提示下载。
      */
     public FileVo.TextContentVo extractText(Long id) {

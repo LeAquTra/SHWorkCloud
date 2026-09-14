@@ -79,11 +79,12 @@ class FileNamingTest {
     }
 
     @Test
-    @DisplayName("在线阅览：位图/PDF/文本/Office 可阅览；可执行文件与未知类型不可")
+    @DisplayName("在线阅览：位图/文本/Office 可阅览；PDF、可执行文件与未知类型不可")
     void previewable() {
         assertTrue(FileNaming.previewable("jpg"));
         assertTrue(FileNaming.previewable("PNG"));
-        assertTrue(FileNaming.previewable("pdf"));
+        // PDF 刻意不支持在线预览（需求）：点击整行不弹窗、下拉框也没有预览项
+        assertFalse(FileNaming.previewable("pdf"));
         // 文本与 Office 走 /files/{id}/text 正文通道（返回 JSON 文本，绝不内联）
         assertTrue(FileNaming.previewable("txt"));
         assertTrue(FileNaming.previewable("docx"));

@@ -69,6 +69,8 @@ public class AvatarService {
         if (user == null) {
             throw new BizException(ErrorCode.FORBIDDEN);
         }
+        // 冷却检查必须放在写 OSS 之前：否则刷子即便被拒，对象也已经落进桶里了
+        AvatarRules.ensureChangeAllowed(user.getAvatarUpdatedAt());
         String oldKey = user.getAvatarKey();
 
         // 1) 先上传新对象（用新 UUID，不复用旧 Key）
@@ -96,6 +98,9 @@ public class AvatarService {
         if (user == null) {
             throw new BizException(ErrorCode.FORBIDDEN);
         }
+        // 清除同样受 24 小时冷却约束（upload 与 clear 共用同一个时间戳），
+        // 否则"换了立刻清掉、再换"就能无限刷
+        AvatarRules.ensureChangeAllowed(user.getAvatarUpdatedAt());
         String oldKey = user.getAvatarKey();
         userMapper.updateAvatar(userId, null);
         deleteQuietly(oldKey, null);

@@ -31,6 +31,37 @@ export function formatDate(value: string | null | undefined): string {
   return value.replace('T', ' ').slice(0, 10)
 }
 
+/**
+ * 解析后端下发的时间字符串。
+ *
+ * 后端是 `LocalDateTime`（无时区），JSON 里可能是
+ * `2026-02-14T10:30:00` 或 `2026-02-14 10:30:00`。
+ * 后者在部分浏览器里 `new Date()` 直接得到 Invalid Date —— 所以先归一成 ISO。
+ * 解析不出来返回 null，由调用方决定怎么降级（例如"冷却中"就直接放开按钮，
+ * 真正的拦截在服务端，前端判断不出来时不该假装用户不能操作）。
+ */
+export function parseBackendTime(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null
+  }
+  const time = new Date(value.trim().replace(' ', 'T'))
+  return Number.isNaN(time.getTime()) ? null : time
+}
+
+/** 把毫秒差写成"X 小时 Y 分钟"，用于头像冷却倒计时 */
+export function formatRemain(ms: number): string {
+  if (ms <= 0) {
+    return '已可修改'
+  }
+  const minutes = Math.ceil(ms / 60000)
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (hours <= 0) {
+    return `${rest} 分钟`
+  }
+  return rest > 0 ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`
+}
+
 export function formatPercent(value: number): string {
   return `${Math.max(0, Math.min(100, Math.round(value)))}%`
 }
@@ -81,7 +112,11 @@ export function canPreview(item: FileItemVO): boolean {
   if (typeof item.previewable === 'boolean') {
     return item.previewable
   }
-  return resolveViewType(item) !== 'none'
+  // 兜底：后端没下发 previewable（旧 jar）时按后缀推断。
+  // ⚠️ pdf 必须排除 —— 需求是"PDF 不支持在线预览"（点击整行不弹窗、
+  // 下拉框里不出现"在线预览"）。若这里放行，遇到旧 jar 就会出现一个点了必报 40073 的入口。
+  const kind = resolveViewType(item)
+  return kind !== 'none' && kind !== 'pdf'
 }
 
 export const VIEW_TYPE_LABELS: Record<ViewType, string> = {

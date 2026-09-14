@@ -7,7 +7,7 @@
       <!-- 左：产品说明。窄屏会整块隐藏，只留表单 -->
       <aside class="showcase">
         <div class="brand">
-          <span class="mark"><el-icon><Notebook /></el-icon></span>
+          <span class="mark"><BrandMark /></span>
           <div>
             <strong>作业云盘</strong>
             <small>Homework Cloud</small>
@@ -105,13 +105,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import {
   Lock,
-  Notebook,
   Refresh,
   UploadFilled,
   User,
   VideoCamera,
   WarningFilled,
 } from '@element-plus/icons-vue'
+import BrandMark from '@/components/BrandMark.vue'
 import RegisterDialog from '@/components/RegisterDialog.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { authApi } from '@/api'

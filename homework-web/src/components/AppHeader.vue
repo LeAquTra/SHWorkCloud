@@ -2,7 +2,7 @@
   <header class="app-header">
     <router-link to="/" class="brand">
       <span class="mark">
-        <el-icon><Notebook /></el-icon>
+        <BrandMark />
       </span>
       <span class="brand-text">
         <strong>作业云盘</strong>
@@ -40,6 +40,8 @@
         </div>
       </div>
     </el-tooltip>
+
+    <AnnouncementBell />
 
     <ThemeToggle />
 
@@ -93,12 +95,13 @@ import {
   ArrowDown,
   Folder,
   Lock,
-  Notebook,
   Picture,
   Setting,
   SwitchButton,
   User,
 } from '@element-plus/icons-vue'
+import BrandMark from '@/components/BrandMark.vue'
+import AnnouncementBell from '@/components/AnnouncementBell.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useUserStore } from '@/stores/user'
 import { ROLE_LABELS } from '@/types/api'

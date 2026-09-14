@@ -8,6 +8,7 @@ import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.Iterator;
 import java.util.Locale;
 
@@ -28,6 +29,43 @@ public final class AvatarRules {
 
     /** 边长上限，防止超大图占用过多内存与带宽 */
     public static final int MAX_DIMENSION = 4096;
+
+    /**
+     * 头像修改的最小间隔（小时）。
+     * <p>
+     * 防的是"恶意用户拿头像当免费图床 / 反复换图骚扰"：每次换头像都会往 OSS
+     * 写一个新对象并删掉旧的，无限次刷会持续消耗存储与请求额度，
+     * 也把对账任务要扫的对象量推高。24 小时是"日常够用、刷子难受"的折中。
+     * <p>更换与清除<b>共用</b>这个间隔 —— 否则"换了立刻清掉再换"就把限制绕过去了。
+     */
+    public static final int CHANGE_INTERVAL_HOURS = 24;
+
+    /**
+     * 距离下次可修改头像的时间点；已经可以改时返回 {@code null}。
+     * <p>抽成纯函数便于单测，也让"能否修改"的判断在服务端与前端展示之间只有一份口径。
+     */
+    public static LocalDateTime nextChangeableAt(LocalDateTime lastChangedAt) {
+        return lastChangedAt == null ? null : lastChangedAt.plusHours(CHANGE_INTERVAL_HOURS);
+    }
+
+    /**
+     * 校验现在是否可以修改头像。
+     *
+     * @param lastChangedAt 上次修改时间（含清除），从未改过传 {@code null}
+     * @return 下次可修改时间；为 {@code null} 表示从未改过（现在就可以）
+     * @throws BizException 还在冷却期内，message 里带上还剩多久
+     */
+    public static LocalDateTime ensureChangeAllowed(LocalDateTime lastChangedAt) {
+        LocalDateTime next = nextChangeableAt(lastChangedAt);
+        if (next == null || !next.isAfter(LocalDateTime.now())) {
+            return next;
+        }
+        long hours = java.time.Duration.between(LocalDateTime.now(), next).toHours() + 1;
+        throw new BizException(ErrorCode.AVATAR_CHANGE_TOO_FREQUENT,
+                "头像每 " + CHANGE_INTERVAL_HOURS + " 小时只能修改一次，约 " + hours
+                        + " 小时后可再次修改（" + next.toLocalDate() + " "
+                        + next.toLocalTime().withNano(0).withSecond(0) + " 之后）");
+    }
 
     public static final String FORMAT_PNG = "png";
     public static final String FORMAT_JPEG = "jpeg";

@@ -1,6 +1,7 @@
 <template>
   <div class="admin">
     <AppHeader />
+    <AnnouncementCenter />
 
     <div class="body">
       <aside class="side">
@@ -45,8 +46,9 @@
 <script setup lang="ts">
 import { computed, onMounted, type Component } from 'vue'
 import { useRoute } from 'vue-router'
-import { InfoFilled, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
+import { Bell, InfoFilled, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
+import AnnouncementCenter from '@/components/AnnouncementCenter.vue'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -73,6 +75,7 @@ const navItems = computed<NavItem[]>(() => {
     items.push({ to: '/admin/captchas', label: '验证码题库', icon: Picture })
   }
   if (user.isSuperAdmin) {
+    items.push({ to: '/admin/announcements', label: '公告管理', icon: Bell })
     items.push({ to: '/admin/ops', label: '运维', icon: Tools })
   }
   return items

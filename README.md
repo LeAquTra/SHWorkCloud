@@ -1,4 +1,4 @@
-# SHWorkCloud 作业云盘
+﻿# SHWorkCloud 作业云盘
 
 学生机房课堂文件保存系统：学生在机房电脑上把文件存进自己的网盘，教师课前批量开号、课后管理账号。
 
@@ -38,8 +38,9 @@
 # 一条命令完成：建库 + 建表 + 索引 + 时区自检（脚本可重复执行）
 mysql -uroot -p < src/main/resources/init_sql/init.sql
 
-# 如果你的库是早期版本建的（缺个性属性/头像字段），改用增量迁移：
-# mysql -uroot -p shwork_cloud < src/main/resources/init_sql/migration_v2.1.sql
+# 如果你的库是早期版本建的，按顺序补增量迁移：
+# mysql -uroot -p shwork_cloud < src/main/resources/init_sql/migration_v2.1.sql   # 个性属性
+# mysql -uroot -p shwork_cloud < src/main/resources/init_sql/migration_v2.2.sql   # 公告表 + 头像冷却时间戳
 ```
 
 ### 2.2 填写本地配置
@@ -91,7 +92,7 @@ mvn spring-boot:run
 ### 3.1 已验证可用的命令
 
 ```bash
-mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 163 个单元测试
+mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 190 个单元测试
 mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository compile
 ```
 
@@ -186,24 +187,25 @@ SHWorkCloud/
 │   ├── application.yaml                     公共配置（无密钥）
 │   ├── application-local.yaml.example       本地模板
 │   ├── application-prod.yaml                生产（全 ${ENV}，缺失即启动失败）
-│   └── init_sql/{init.sql,migration_v2.1.sql}  一键初始化与增量迁移脚本
+│   └── init_sql/{init.sql,migration_v2.1.sql,migration_v2.2.sql}  一键初始化与增量迁移脚本
 ├── src/main/java/com/leaqutra/shworkcloud/
 │   ├── common/                              R / ErrorCode / BizException / 全局异常处理
 │   ├── config/                              OSS・STS・app 配置、Sa-Token、MyBatis-Plus
 │   ├── security/                            登录上下文、角色缓存、限流、密码、CIDR
-│   ├── entity/ mapper/                      6 张表
+│   ├── entity/ mapper/                      7 张表
 │   ├── dto/ vo/                             请求与响应模型
 │   ├── service/                             业务服务 + job/ 定时任务
 │   └── controller/                          REST 接口（admin/ 为后台）
-├── src/test/java/                           单元测试（108 个用例）
+├── src/test/java/                           单元测试（190 个用例）
 └── homework-web/                            前端（Vue 3 + Vite + TS + Element Plus）
     ├── src/api/                             axios 封装 + 拦截器（Token 走 sessionStorage）
     ├── src/utils/uploader.ts                预签名直传：单次 PUT / 分片 / 断点续传 / 速率
     ├── src/utils/md5.ts                     纯 TS MD5（有 RFC 向量验证）
     ├── src/workers/md5.worker.ts            分块计算指纹，不卡界面
-    ├── src/stores/                          user（会话隔离）/ uploader（上传队列）
+    ├── src/stores/                          user（会话隔离）/ uploader（上传队列）/ announcement（公告）
     ├── src/composables/useIdleLogout.ts     空闲自动登出
-    └── src/views/                           登录、改密、网盘、后台（用户/导入/题库/运维）
+    ├── public/favicon.svg                   站点图标（标签页 + 页头同一个标识）
+    └── src/views/                           登录、改密、网盘、后台（用户/导入/题库/公告/运维）
 ```
 
 ---
@@ -227,12 +229,14 @@ SHWorkCloud/
 | 文件 | `GET /api/files/{id}/download-url`、`/preview-url` | 10 分钟签名 URL |
 | 回收站 | `GET /api/recycle`、`POST /recycle/restore`、`DELETE /recycle/purge`、`/recycle/empty` | — |
 | 用户 | `GET /api/user/profile`、`PUT /user/profile`、`GET /user/quota` | 资料/个性属性/容量 |
-| 头像 | `POST /api/user/avatar`、`DELETE /api/user/avatar`、`GET /api/user/avatar/{userId}` | 仅 JPG/PNG、≤5MB、存 OSS；换头像自动删旧对象 |
-| 在线阅读 | `GET /api/files/{id}/preview-url`、`GET /api/files/{id}/preview`、`GET /api/files/{id}/text`（含 `html` 原格式）、`GET /api/files/{id}/embedded-images` | 图片/PDF/视频/音频流式预览（支持 Range）；**docx 渲染成结构化 HTML、xlsx 渲染成 HTML 表格**；docx/pptx 内嵌图片以 data URL 返回 |
+| 头像 | `POST /api/user/avatar`、`DELETE /api/user/avatar`、`GET /api/user/avatar/{userId}` | 仅 JPG/PNG、≤5MB、存 OSS；换头像自动删旧对象；**每 24 小时限一次**（冷却中返回 40123，`avatarChangeableAt` 给出下次可改时间） |
+| 在线阅读 | `GET /api/files/{id}/preview-url`、`GET /api/files/{id}/preview`、`GET /api/files/{id}/text`（含 `html` 原格式）、`GET /api/files/{id}/embedded-images` | 图片/视频/音频流式预览（支持 Range）；**PDF 按需求不提供在线预览**；docx 渲染成结构化 HTML、xlsx 渲染成 HTML 表格；docx/pptx 内嵌图片以 data URL 返回 |
 | 图片管理 | `GET /api/images` | 跨目录相册列表，每项已带签名预览地址 |
+| 公告 | `GET /api/announcements/active` | 当前生效公告；`level` 1 普通 / 2 重要 → 顶部横幅，3 紧急 → 强制弹窗 |
 | 后台 | `GET /api/admin/users`、`PUT /admin/users/{id}/{status,quota,reset-password,role}`、`PUT /admin/users/{id}`（代改资料，部分更新） | 用户管理 |
 | 后台 | `GET /api/admin/students/import-template`、`POST /admin/students/import` | 名单导入 |
 | 后台 | `/api/admin/captchas/**` | 题库管理 |
+| 后台 | `/api/admin/announcements/**` | 公告管理：列表/新建/修改/发布/撤回/删除（仅超管；已发布必须先撤回才能改） |
 | 运维 | `/api/admin/ops/**` | 孤儿对象、路径重算、机房清场、容量对账（仅超管） |
 
 统一返回：`{ "code": 0, "message": "ok", "data": {...} }`。
@@ -272,7 +276,9 @@ SHWorkCloud/
 | **下载回本地** | 仅签名 URL | 增加 `GET /files/{id}/download` 流式下载（支持 `Range`） | 调用方只连业务服务器即可下载，且可断点续传 |
 | OSS `Content-Type` | 未说明 | 预签名接口返回签名用的 `contentType`，客户端必须原样发送 | OSS V1 签名把 Content-Type 计入待签串，不一致会 SignatureDoesNotMatch |
 | **前端** | 文档要求交付 Vue 前端 | **不交付**，只提供 REST 接口 | 需求方只负责后端 |
-| **自定义头像** | `avatar` 是文本 URL 字段 | 改为服务端上传 OSS，DB 存 `avatar_key` | 需求：仅 JPG/PNG、≤5MB、存 OSS；且换头像要能删掉旧对象 |
+| **自定义头像** | `avatar` 是文本 URL 字段 | 改为服务端上传 OSS，DB 存 `avatar_key`；**每 24 小时限改一次**（`avatar_updated_at` + `avatarChangeableAt`） | 需求：仅 JPG/PNG、≤5MB、存 OSS；换头像要能删掉旧对象；限制频率是为了防"拿头像当免费图床反复刷图" |
+| **PDF 不预览** | viewType=pdf 时用浏览器阅读器打开 | `FileViewType.viewable()` 对 pdf 返回 false → `previewable=false`、`preview-url` 返回 40073 | 需求方明确要求：点击表单项不弹窗、操作下拉框里删掉"预览"。注意 `viewType` 仍是 `pdf`（图标与分类要用） |
+| **公告** | 无 | 新表 `announcement` + 注意力分级（1 普通 / 2 重要 → 可关横幅；3 紧急 → 强制弹窗）；已发布必须先撤回才能改 | 需求：超管管理/发布/撤回公告，公告做注意力分级。禁止直接改已发布公告是为了避免"用户正在看的公告被静默改内容" |
 | **删除即清 OSS** | 仅彻底删除才删 OSS | `app.recycle.enabled=false` 时删除即彻底删除；删用户/头像/题目也删 OSS | 需求：保证 OSS 容器整洁 |
 | **OSS 对账** | 无 | 每日扫 `homework/`、`avatar/`、`captcha/` 清理无引用对象（24h 宽限） | 远程删除可能失败，需要兜底 |
 | **排除 `sa-token-jackson`** | 未提及 | pom 里 `exclude` 掉 Sa-Token 带来的 `sa-token-jackson`，并自建 `SaTokenJsonConfig` 注入基于 **Jackson 3** 的 `SaJsonTemplate` | 🔴 **真实故障**：Sa-Token 1.45 会扫描所有 jar 的 `META-INF/satoken/` 并立即 install 插件，`sa-token-jackson` 的 `install()` 引用 **Jackson 2** 的 `PolymorphicTypeValidator`，而 Boot 4 只有 **Jackson 3**（`tools.jackson`）→ `NoClassDefFoundError` → **应用启动即崩、systemd 无限重启**。Sa-Token 对插件异常 fail-fast，不跳过坏插件，只能排除依赖。回归守卫：`SaTokenStackTest` |
@@ -310,6 +316,9 @@ curl -X POST "http://localhost:8081/api/admin/ops/oss-reconcile?dryRun=false" -H
 - **未完成分片**无法由应用清理，必须在 OSS 控制台配置生命周期规则
   `AbortIncompleteMultipartUpload = 3 天`；
 - 秒传**仅限本人文件**，不跨用户（保护隐私）；跨用户公共素材库见文档 §9.6；
+- 公告的"已读"状态存在前端（`sessionStorage`），后端**不记录谁读过哪条** ——
+  公告是广播（如"今晚断电维护"），需要 per-user 送达确认的话得另外建表；
+- 头像冷却 24 小时是**硬编码常量**（`AvatarRules.CHANGE_INTERVAL_HOURS`），要调整得重新打包；
 - 搜索为**前缀匹配**（`LIKE 'x%'`）；全模糊匹配需要 FULLTEXT(ngram) 或 ES；
 - 教师收作业闭环（班级/作业/提交/批改）属**第二阶段**，文档 §13 已给出模型与预留字段；
 - 集成测试需真实 MySQL/Redis/OSS：

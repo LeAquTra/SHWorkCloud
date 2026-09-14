@@ -143,15 +143,31 @@ public final class FileViewType {
         return NONE;
     }
 
-    /** 是否可以在线阅览（任何非 none 的类型） */
+    /**
+     * 是否可以在线阅览。
+     * <p>
+     * 前端"预览"入口（点击整行、操作下拉框的"在线预览"）与
+     * {@code GET /files/{id}/preview-url} 都以它为准，所以这里是唯一的开关点。
+     * <p>
+     * ⚠️ <b>PDF 被刻意排除</b>：需求方明确要求 PDF 不支持在线预览
+     * （点击整行不弹窗、下拉框里也不出现"在线预览"）。
+     * 注意 {@link #of} 仍把 {@code pdf} 判为 {@link #PDF} —— 分类与文件图标还要用它，
+     * 这里改的只是"能不能在线看"。
+     */
     public static boolean viewable(String suffix) {
-        return !NONE.equals(of(suffix));
+        String type = of(suffix);
+        if (NONE.equals(type)) {
+            return false;
+        }
+        return !PDF.equals(type);
     }
 
-    /** 是否用「流式预览」接口（{@code GET /files/{id}/preview}），而不是 /text */
+    /**
+     * 是否用「流式预览」接口（{@code GET /files/{id}/preview}），而不是 /text。
+     * <p>PDF 不在预览之列，故不包含 {@link #PDF}。
+     */
     public static boolean streamable(String viewType) {
-        return IMAGE.equals(viewType) || PDF.equals(viewType)
-                || VIDEO.equals(viewType) || AUDIO.equals(viewType);
+        return IMAGE.equals(viewType) || VIDEO.equals(viewType) || AUDIO.equals(viewType);
     }
 
     /** 是否用「文本提取」接口（{@code GET /files/{id}/text}） */
@@ -159,7 +175,7 @@ public final class FileViewType {
         return TEXT.equals(viewType) || OFFICE.equals(viewType);
     }
 
-    /** 是否支持 Range（视频/音频拖动进度条） */
+    /** 是否支持 Range（视频/音频拖动进度条；PDF 虽不可预览，协议本身仍支持断点续传） */
     public static boolean rangeSupported(String viewType) {
         return VIDEO.equals(viewType) || AUDIO.equals(viewType) || PDF.equals(viewType);
     }

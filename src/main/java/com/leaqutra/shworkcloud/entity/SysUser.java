@@ -58,6 +58,14 @@ public class SysUser {
      */
     private String avatarKey;
 
+    /**
+     * 上次修改（或清除）头像的时间。
+     * <p>用于"头像每 24 小时只能改一次"的冷却判断，见
+     * {@link com.leaqutra.shworkcloud.service.AvatarRules#ensureChangeAllowed}。
+     * 从未改过为 {@code null}。
+     */
+    private LocalDateTime avatarUpdatedAt;
+
     /** 个性签名 */
     private String signature;
 

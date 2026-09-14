@@ -31,4 +31,15 @@ public final class AdminDto {
     /** 机房清场：按 IP 前缀/网段批量踢出会话 */
     public record SessionFlushReq(String ipPrefix) {
     }
+
+    /**
+     * 新增/修改公告。
+     *
+     * @param level      注意力分级：1 普通 / 2 重要 / 3 紧急
+     * @param content    纯文本正文（不接受 HTML）
+     * @param expireTime 为空表示不过期
+     */
+    public record AnnouncementUpsertReq(String title, String content, Integer level,
+                                       java.time.LocalDateTime expireTime) {
+    }
 }

@@ -1,6 +1,7 @@
 <template>
   <div class="user-layout">
     <AppHeader />
+    <AnnouncementCenter />
     <main class="user-main">
       <router-view />
     </main>
@@ -9,6 +10,7 @@
 
 <script setup lang="ts">
 import AppHeader from '@/components/AppHeader.vue'
+import AnnouncementCenter from '@/components/AnnouncementCenter.vue'
 
 /** 学生 / 教师侧的统一外壳：顶栏 + 路由出口。 */
 </script>

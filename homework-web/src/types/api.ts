@@ -67,6 +67,14 @@ export interface UserProfileVO {
   avatarUrl: string | null
   /** 头像版本串，用于换头像后绕过缓存 */
   avatarVersion: string | null
+  /**
+   * 头像**下次可修改时间**；为 null 表示现在就能改。
+   *
+   * 服务端限制「每 24 小时只能改一次头像」（防止拿头像当图床刷）。
+   * 前端据此把按钮置灰并显示倒计时 —— 但真正的拦截始终在服务端，
+   * 这里只是为了不让用户白点一次才报错。
+   */
+  avatarChangeableAt: string | null
   signature: string | null
   gender: number
   birthday: string | null
@@ -342,6 +350,76 @@ export interface ReconcileVO {
 
 export interface SessionFlushVO {
   kickedCount: number
+}
+
+// ---------------------------------------------------------------- 公告
+
+/**
+ * 公告的**注意力分级** —— 决定"怎么打扰用户"，是公告功能的核心设计。
+ *
+ * 1 普通：顶部横幅，可关；
+ * 2 重要：顶部警示色横幅，可关；
+ * 3 紧急：**强制弹窗**，必须点「我已知晓」才能继续操作。
+ *
+ * 分级由超管在后台设置，前端不自行推断。
+ */
+export const ANNOUNCEMENT_LEVEL_NORMAL = 1
+export const ANNOUNCEMENT_LEVEL_IMPORTANT = 2
+export const ANNOUNCEMENT_LEVEL_URGENT = 3
+
+/** 公告状态：草稿 / 已发布 / 已撤回（撤回只改状态、不删数据） */
+export const ANNOUNCEMENT_STATUS_DRAFT = 0
+export const ANNOUNCEMENT_STATUS_PUBLISHED = 1
+export const ANNOUNCEMENT_STATUS_RECALLED = 2
+
+export const ANNOUNCEMENT_LEVEL_LABELS: Record<number, string> = {
+  [ANNOUNCEMENT_LEVEL_NORMAL]: '普通',
+  [ANNOUNCEMENT_LEVEL_IMPORTANT]: '重要',
+  [ANNOUNCEMENT_LEVEL_URGENT]: '紧急',
+}
+
+export const ANNOUNCEMENT_STATUS_LABELS: Record<number, string> = {
+  [ANNOUNCEMENT_STATUS_DRAFT]: '草稿',
+  [ANNOUNCEMENT_STATUS_PUBLISHED]: '已发布',
+  [ANNOUNCEMENT_STATUS_RECALLED]: '已撤回',
+}
+
+/** 用户端 `GET /announcements/active`：只含当前生效的公告 */
+export interface AnnouncementActiveVO {
+  id: number
+  title: string
+  /** 纯文本正文，按换行渲染（后端不接受 HTML） */
+  content: string
+  /** 1 普通 / 2 重要 / 3 紧急 */
+  level: number
+  publishTime: string | null
+  expireTime: string | null
+}
+
+/** 后台 `GET /admin/announcements`：带状态与审计字段 */
+export interface AnnouncementManageVO {
+  id: number
+  title: string
+  content: string
+  level: number
+  /** 0 草稿 / 1 已发布 / 2 已撤回 */
+  status: number
+  publishTime: string | null
+  expireTime: string | null
+  createdBy: number | null
+  createTime: string
+  updateTime: string
+  /** 此刻是否真的对用户可见（已发布 + 已到时间 + 未过期） */
+  effective: boolean
+}
+
+/** 新建 / 修改公告的请求体 */
+export interface AnnouncementUpsertReq {
+  title: string
+  content: string
+  level: number
+  /** 为空表示不过期；最多一年后 */
+  expireTime?: string | null
 }
 
 // ---------------------------------------------------------------- 角色

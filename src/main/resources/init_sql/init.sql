@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS `sys_user` (
   `password`         VARCHAR(100)  NOT NULL COMMENT 'BCrypt 密文（强度 10）',
   `nickname`         VARCHAR(50)   DEFAULT NULL COMMENT '昵称',
   `avatar_key`       VARCHAR(512)  DEFAULT NULL COMMENT '自定义头像在 OSS 的 ObjectKey（形如 avatar/{userId}/{uuid}.png）',
+  `avatar_updated_at` DATETIME     DEFAULT NULL COMMENT '上次修改/清除头像的时间；用于"24 小时只能改一次"的冷却判断',
   `signature`        VARCHAR(255)  DEFAULT NULL COMMENT '个性签名',
   `gender`           TINYINT       NOT NULL DEFAULT 0 COMMENT '性别：0未知 1男 2女',
   `birthday`         DATE          DEFAULT NULL COMMENT '生日',
@@ -206,7 +207,33 @@ CREATE TABLE IF NOT EXISTS `email_send_log` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='邮件发送审计';
 
 -- ---------------------------------------------------------------------------
--- 9. 可选：创建最小权限的应用账号（生产环境推荐，不用 root 连库）
+-- 9. 系统公告（含注意力分级）
+-- ---------------------------------------------------------------------------
+-- level 注意力分级：
+--   1 普通 —— 顶部横幅，可关闭
+--   2 重要 —— 横幅 + 警示配色，可关闭
+--   3 紧急 —— **弹窗强制确认**，不点"我知道了"不能继续
+-- status：0 草稿 / 1 已发布 / 2 已撤回
+--   "撤回"只改状态、保留数据，便于追溯谁在什么时候发过什么。
+CREATE TABLE IF NOT EXISTS `announcement` (
+  `id`           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '公告ID',
+  `title`        VARCHAR(120) NOT NULL COMMENT '标题',
+  `content`      TEXT         NOT NULL COMMENT '正文（纯文本，前端按换行渲染）',
+  `level`        TINYINT      NOT NULL DEFAULT 1 COMMENT '注意力分级：1普通 2重要 3紧急',
+  `status`       TINYINT      NOT NULL DEFAULT 0 COMMENT '0草稿 1已发布 2已撤回',
+  `publish_time` DATETIME     DEFAULT NULL COMMENT '发布时间；撤回后保留用于追溯',
+  `expire_time`  DATETIME     DEFAULT NULL COMMENT '过期时间；为空表示不过期',
+  `created_by`   BIGINT       DEFAULT NULL COMMENT '创建/发布者用户ID',
+  `create_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                               ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_status_level` (`status`, `level`, `publish_time`),
+  KEY `idx_publish_time` (`publish_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统公告';
+
+-- ---------------------------------------------------------------------------
+-- 10. 可选：创建最小权限的应用账号（生产环境推荐，不用 root 连库）
 -- ---------------------------------------------------------------------------
 -- 把 'YourStrongPassword' 换成强密码，并与 application-prod.yaml 的 DB_PASSWORD 一致。
 -- 只给业务必需的四类权限，不给 DROP / ALTER / GRANT。
@@ -218,7 +245,7 @@ CREATE TABLE IF NOT EXISTS `email_send_log` (
 -- FLUSH PRIVILEGES;
 
 -- ---------------------------------------------------------------------------
--- 10. 自检
+-- 11. 自检
 -- ---------------------------------------------------------------------------
 SELECT '建库建表完成' AS `status`,
        (SELECT COUNT(*) FROM information_schema.tables
@@ -227,6 +254,6 @@ SELECT '建库建表完成' AS `status`,
        @@session.time_zone AS `session_tz`,
        @@character_set_database AS `charset`;
 
--- 期望结果：table_count = 6，charset = utf8mb4
+-- 期望结果：table_count = 7，charset = utf8mb4
 -- 超级管理员由应用启动时创建（见 README §2.3），此处查询结果为空属正常：
 SELECT COUNT(*) AS `super_admin_count` FROM `sys_user` WHERE `role` = 9;

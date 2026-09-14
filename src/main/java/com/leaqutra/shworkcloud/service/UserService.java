@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
 
@@ -125,7 +126,20 @@ public class UserService {
                 user.getRole() == null ? 0 : user.getRole().intValue(),
                 quota.quota(), quota.used(), quota.free(), quota.recycleUsed(),
                 appProperties.getClassroom().getIdleLogoutMinutes(),
-                appProperties.getClassroom().getCheckoutWarnMinutes());
+                appProperties.getClassroom().getCheckoutWarnMinutes(),
+                // 头像冷却：前端据此显示"还需等待 X 小时"并禁用上传按钮。
+                // 语义收紧成「冷却到什么时候」——已经过了冷却期就返回 null，
+                // 免得客户端拿到一个过去的时间点还要自己判断"这算不算冷却中"。
+                avatarChangeableAt(user.getAvatarUpdatedAt()));
+    }
+
+    /**
+     * 资料里的 {@code avatarChangeableAt}：只在<b>冷却中</b>时给出未来时间点，否则为 null。
+     * <p>包级可见是为了能直接单测这个纯函数（不必起 Spring 上下文）。
+     */
+    static LocalDateTime avatarChangeableAt(LocalDateTime avatarUpdatedAt) {
+        LocalDateTime next = AvatarRules.nextChangeableAt(avatarUpdatedAt);
+        return next != null && next.isAfter(LocalDateTime.now()) ? next : null;
     }
 
     /** null 与空串统一成 null（表示清空） */

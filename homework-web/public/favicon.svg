@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="作业云盘">
+  <title>作业云盘</title>
+  <!--
+    站点图标（浏览器标签页 / 书签）。
+
+    刻意只用 SVG：矢量在任何 DPI 下都清晰，且不需要引入图片处理工具链。
+    形状与 src/components/BrandMark.vue 保持同一份「云」的几何定义，
+    改这里时记得同步改那边，保证标签页与页头是同一个标识。
+  -->
+  <defs>
+    <linearGradient id="scBrand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1" />
+      <stop offset=".55" stop-color="#8b5cf6" />
+      <stop offset="1" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#scBrand)" />
+  <g fill="#ffffff" transform="translate(8 8) scale(2)">
+    <ellipse cx="12" cy="14.6" rx="8.2" ry="3.4" />
+    <circle cx="8.8" cy="11.6" r="3.5" />
+    <circle cx="14.2" cy="10.6" r="4.3" />
+  </g>
+</svg>

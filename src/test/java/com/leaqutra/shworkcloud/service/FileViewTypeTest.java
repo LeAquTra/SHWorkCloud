@@ -94,7 +94,9 @@ class FileViewTypeTest {
     @DisplayName("渲染通道：哪些走流式预览、哪些走文本接口")
     void channels() {
         assertTrue(FileViewType.streamable(FileViewType.IMAGE));
-        assertTrue(FileViewType.streamable(FileViewType.PDF));
+        // PDF 刻意不支持在线预览（需求）：它仍被识别为 pdf 类型（图标/分类要用），
+        // 但既不走流式预览，也不可点开
+        assertFalse(FileViewType.streamable(FileViewType.PDF));
         assertTrue(FileViewType.streamable(FileViewType.VIDEO));
         assertTrue(FileViewType.streamable(FileViewType.AUDIO));
         assertFalse(FileViewType.streamable(FileViewType.TEXT));
@@ -103,6 +105,31 @@ class FileViewTypeTest {
         assertTrue(FileViewType.extractable(FileViewType.TEXT));
         assertTrue(FileViewType.extractable(FileViewType.OFFICE));
         assertFalse(FileViewType.extractable(FileViewType.IMAGE));
+    }
+
+    @Test
+    @DisplayName("PDF：仍被识别为 pdf 类型，但明确不可在线预览")
+    void pdfIsIdentifiedButNotPreviewable() {
+        // 类型判定保留：分类筛选、文件图标、Content-Type 映射都还要用
+        assertEquals(FileViewType.PDF, FileViewType.of("pdf"));
+        assertEquals("application/pdf", FileViewType.inlineContentType("pdf"));
+        assertEquals("document", FileViewType.category("pdf"));
+        // 但"能不能开"为否 —— 点击整行不弹窗、下拉框里也不出现"在线预览"
+        assertFalse(FileViewType.viewable("pdf"));
+        assertFalse(FileViewType.streamable(FileViewType.PDF));
+        // 其它可预览类型不受影响
+        assertTrue(FileViewType.viewable("jpg"));
+        assertTrue(FileViewType.viewable("docx"));
+        assertTrue(FileViewType.viewable("xlsx"));
+    }
+
+    @Test
+    @DisplayName("viewable 与 previewable 口径一致（单一来源，不能各判一套）")
+    void viewableMatchesNaming() {
+        for (String suffix : new String[]{"pdf", "jpg", "docx", "xlsx", "mp4", "zip", "exe"}) {
+            assertEquals(FileViewType.viewable(suffix), FileNaming.previewable(suffix),
+                    "两个入口对 " + suffix + " 的判断必须一致");
+        }
     }
 
     @Test

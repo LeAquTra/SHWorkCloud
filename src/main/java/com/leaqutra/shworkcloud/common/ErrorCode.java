@@ -42,6 +42,10 @@ public enum ErrorCode {
     IMPORT_VALIDATE_FAILED(40091, "导入数据校验失败"),
     IMPORT_LIMIT_EXCEEDED(40092, "导入行数或文件大小超限"),
 
+    // ---------- 公告 ----------
+    ANNOUNCEMENT_NOT_FOUND(40094, "公告不存在"),
+    ANNOUNCEMENT_STATE_INVALID(40095, "公告当前状态不允许该操作"),
+
     // ---------- 认证与会话 ----------
     UNAUTHORIZED(40100, "未登录或会话已失效"),
     CAPTCHA_EXPIRED(40101, "验证码已过期或不存在，请重新获取"),
@@ -61,6 +65,7 @@ public enum ErrorCode {
     ADMIN_PROTECTED(40120, "超级管理员账号受保护，禁止该操作"),
     STUDENT_NO_EXISTS(40121, "学号已存在"),
     REGISTER_DISABLED(40122, "自助注册未开放"),
+    AVATAR_CHANGE_TOO_FREQUENT(40123, "头像修改过于频繁"),
 
     // ---------- 权限 ----------
     FORBIDDEN(40300, "无权限访问该资源"),

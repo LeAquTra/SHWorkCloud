@@ -1,4 +1,4 @@
-# 作业云盘 SHWorkCloud 开发文档（v2.0 机房场景版）
+﻿# 作业云盘 SHWorkCloud 开发文档（v2.0 机房场景版）
 
 > 版本：v2.0
 > 日期：2026-09-11
@@ -97,6 +97,8 @@
 | v1.0 | 2026-09-11 | 初版：网盘主线 + QQ 邮箱注册 + 图片验证码 + 超管后台 | — |
 | v1.1 | 2026-09-11 | 补充图片验证码题库、后台用户管理 | — |
 | **v2.0** | **2026-09-11** | **技术栈对齐工程现状（Boot 4.1.1 + Sa-Token）；新增机房场景专项设计（第 3 章）与提交保障；账号体系改为"学号登录为主 + 名单批量导入"；修复 3 处数据契约缺陷（同级唯一约束、commit 幂等、objectKey 签发）；补齐非功能、测试、验收章节** | 评审修订 |
+| v2.1 | 2026-09-13 | 落地需求增补：自助注册开放（R1）、个性属性扩展、自定义头像上传 OSS、`GET /files/{id}/download` 流式下载、后台代改用户资料、验证码题库在线阅览、docx/pptx 内嵌图片、旧版 `.doc` 正文提取、OSS 强制 HTTPS、`sa-token-jackson` 排除等（逐条见 §0.6） | 实现同步 |
+| **v2.2** | **2026-09-14** | **四项优化：① PDF 不再提供在线预览（R19）；② 头像 24 小时冷却（R15 + `sys_user.avatar_updated_at`）；③ 站点图标（`favicon.svg` + `BrandMark`）；④ 公告功能（R20 + `announcement` 表 + 注意力分级）。另：docx/xlsx 服务端渲染结构化 HTML、压缩包/视频独立传输上限 + `GET /oss/upload-config`** | 实现同步 |
 
 ### 0.3 相对 v1.1 的关键修正
 
@@ -164,7 +166,7 @@
 
 ## 0.6 实现状态与已知差异
 
-> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（163 个用例，1 个跳过）均通过。
+> 后端代码已按本文档实现，`mvn -o compile` 与 `mvn -o test`（190 个用例，1 个跳过）均通过。
 > 下列偏差由**本机离线环境**（本地 Maven 仓库缺少部分 artifact）导致，已在代码注释中标注，
 > 完整说明见 `README.md` §7。
 
@@ -196,6 +198,12 @@
 | **删除即清 OSS** | 只有彻底删除才删 OSS | 新增 `app.recycle.enabled=false` 时「删除即彻底删除」；删除用户/头像/题目也同步删 OSS | 需求：保证 OSS 容器整洁 |
 | **OSS 对账** | 无 | 新增 `OssReconcileService` + 每日任务，扫 `homework/`、`avatar/`、`captcha/` 三个前缀清理无引用对象（24 小时宽限） | 远程删除可能失败、进程可能被强杀，必须有兜底才谈得上"整洁" |
 | **旧版 `.doc` 在线阅览** | 未提及（v1.1 隐含"二进制格式不支持"） | 引入 `poi` **核心包**，用 `POIFSFileSystem` 打开 OLE2 容器，再自写 FIB + piece table 解析取正文；`FileViewType` 把 `doc` 归入 `office` | `.doc` 是 OLE2 复合文档，没有 zip+xml 那种轻量解法。解析 `.doc` 的 HWPF 在 `poi-scratchpad` 里，本机离线取不到该 artifact；而容器层（CFB 的 FAT/MiniFAT/DIFAT 链）容易写错，交给 POI 核心包里的 `poifs` 最稳妥。旧版 `.ppt`（二进制）沿用 `none` |
+| **docx / xlsx 结构化 HTML** | R18 只说"提取正文，排版会丢失" | 新增 `OfficeHtmlService`：用 JDK 自带 DOM 解析 `word/document.xml` / `xl/worksheets/*.xml` + `sharedStrings.xml`，渲染成**结构化 HTML**（段落、标题、加粗斜体、表格），随 `GET /files/{id}/text` 的 `html` 字段下发；前端 `v-html` 渲染并再做一层白名单过滤（`sanitizeOfficeHtml`） | 本机离线**装不上任何文档渲染库**（docx-preview / mammoth / SheetJS 全都没有本地 artifact），而学生最常交的就是 Word 与 Excel 作业，"只有一坨纯文本"体验太差。约束：XXE 加固（禁 DOCTYPE 与外部实体）、全部文本转义、HTML ≤40 万字符、表格 ≤300×40，**明确不是像素级还原** |
+| **PDF 不预览** | viewType=pdf 用浏览器内置阅读器 | `FileViewType.viewable()` 对 pdf 返回 **false** → `previewable=false`、`preview-url` 返回 `40073`；`streamable()` 与 `rangeSupported()` 的语义相应收窄 | 需求方要求"点击表单项不弹窗、操作下拉框删除预览按钮"。注意 `of("pdf")` 仍是 `PDF`（图标/分类要用），改的只是"能不能在线看"；前端因此必须用 `previewable` 而不是 `viewType !== 'none'` 判断入口显隐。回归守卫：`FileViewTypeTest` |
+| **头像 24 小时冷却** | 未提及 | 新增 `sys_user.avatar_updated_at` 列 + `AvatarRules`，`upload` 与 `clear` **共用**冷却判定，冷却中返回 `40123`；资料接口新增 `avatarChangeableAt`（下次可改时间）供前端置灰按钮 | 需求：防止恶意用户反复换头像。检查放在**写 OSS 之前** —— 否则刷子即便被拒，对象也已经落进桶里了。共用冷却是因为"换了立刻清掉再换"能绕过只对 upload 的限制。回归守卫：`AvatarRulesTest` |
+| **公告（注意力分级）** | 未提及 | 新增 `announcement` 表 + `AnnouncementService`（用户端只读生效列表）/ `AdminAnnouncementService`（超管增删改发撤）；分级 `1/2` 走可关横幅、`3` 走强制弹窗；已发布状态**禁止直接改/删**，必须先 `recall` | 需求：超管管理与发布/撤回公告，公告做注意力分级。`recall` 只改状态并保留 `publishTime`，便于事后追溯"谁在什么时候发过什么"；禁止直接改已发布公告，是因为公告带时间含义（"今晚 22:00 断网"），静默改内容等于篡改历史。后台列表带 `effective` 字段，避免"发了但没生效"扯皮。回归守卫：`AnnouncementRulesTest` |
+| **站点图标** | 未提及 | 新增 `homework-web/public/favicon.svg`（品牌渐变 + 云标识）与 `BrandMark.vue`，`index.html` 声明 `<link rel="icon" type="image/svg+xml">` | 之前标签页是浏览器默认的空白图标。用 SVG：一个文件覆盖所有 DPI，且与页头标识共享同一份几何定义；Vite 会把 `public/` 原样拷进 `dist/`，无需额外构建步骤 |
+| **压缩包 / 视频的独立传输上限** | 只有全局 `max-file-size-bytes` | 新增 `app.upload.transfer-limits.{video,archive}` 与 `app.upload.folder-max-total-bytes`，并通过 **`GET /oss/upload-config`** 下发给前端做上传前预检 | 前端不应硬编码上限数字（改配置就会出现两边不一致）。文件夹总大小上限挡的是"一次拖 200 个文件把出口带宽打满"；分类档位让"允许传 100MB 视频、但不允许传 100MB 的 zip"成为可配置项 |
 
 **尚未实现**：教师收作业闭环（§13）、前端全部代码、监控告警接入、备份恢复演练、
 60 并发压测，以及需要在 OSS 控制台手工配置的生命周期规则（§4.3）。
@@ -252,9 +260,11 @@ flowchart LR
 | R5 | OSS 存储 | 文件通过 STS 临时凭证从浏览器**直传**阿里云 OSS；**objectKey 由服务端签发** |
 | R6 | 索引落库 | 数据库保存 ObjectKey 与该文件在网盘中的目录索引；`commit` 幂等 |
 | R7 | 增值能力 | 按类型筛选、搜索（前缀匹配）、容量统计、MD5 秒传 |
-| R15 | **自定义头像** | 用户可上传/更换/清除头像：仅 **JPG/PNG**、**≤5MB**、存阿里云 OSS；换头像时服务端**删除 OSS 上的旧对象** |
+| R15 | **自定义头像** | 用户可上传/更换/清除头像：仅 **JPG/PNG**、**≤5MB**、存阿里云 OSS；换头像时服务端**删除 OSS 上的旧对象**；**每 24 小时限改一次**（更换与清除共用冷却，防"拿头像当免费图床反复刷图"） |
 | R17 | **图片管理** | 支持 jpg/jpeg/png/gif/webp/bmp 图片的识别、分类筛选与**相册视图**（跨目录摊平、按时间倒序、自带签名预览地址） |
-| R18 | **文件在线阅览** | 图片/PDF/视频/音频**流式预览**（支持 `Range`，视频可拖进度条）；文本与 **doc/docx/pptx** **提取正文**在线阅读（`.doc` 走 OLE2 容器 + FIB/piece table，无需 `poi-scratchpad`）；`viewType` 由服务端下发，前端不必自维护白名单。旧版 `.ppt` 仍为 `none` |
+| R18 | **文件在线阅览** | 图片 / 视频 / 音频**流式预览**（支持 `Range`，视频可拖进度条）；文本与 **doc/docx/pptx/xlsx** **提取正文**在线阅读（`.doc` 走 OLE2 容器 + FIB/piece table，无需 `poi-scratchpad`），其中 **docx / xlsx 额外下发服务端渲染的结构化 HTML**（近似原格式，非像素级还原）；`viewType` 由服务端下发，前端不必自维护白名单。旧版 `.ppt` / `.xls` 仍为 `none`。**PDF 不提供在线预览**（见 R19） |
+| R19 | **PDF 不预览** | 需求方明确要求：PDF **点击表单项不弹窗、操作下拉框里删除"预览"**。实现为 `FileViewType.viewable("pdf")=false` → `previewable=false`、`preview-url` 返回 `40073`；`viewType` 仍为 `pdf`（文件图标与分类筛选用它），只保留下载入口 |
+| R20 | **公告（注意力分级）** | 超级管理员管理/发布/撤回公告；公告数据落库（表 `announcement`）。**注意力分级**决定打扰方式：`1` 普通 → 可关闭的顶部横幅；`2` 重要 → 警示色横幅；`3` 紧急 → **强制弹窗**（必须点"我已知晓"，不能用 Esc / 点遮罩绕过）。已发布的公告**必须先撤回才能修改**，避免用户正在看的公告被静默改内容 |
 | R16 | **OSS 整洁性** | 删除文件/用户/头像/题目时同步删除 OSS 对象；每日对账清理无引用对象，保证 Bucket 不堆积垃圾 |
 | R8 | 上传可靠性 | 分片上传、断点续传（会话内）、失败分类提示、孤儿对象回收 |
 | R9 | 提交保障 | 两阶段进度反馈、提交凭证、离开页面拦截、下课倒计时提醒 |
@@ -309,6 +319,7 @@ flowchart LR
 | 调整容量配额 | ❌ | ❌ | ✅ | ✅ |
 | 容量对账重算 | ❌ | ❌ | ✅ | ✅ |
 | 验证码题库管理 | ❌ | ❌ | ✅ | ✅ |
+| **发布 / 撤回公告** | ❌ | ❌ | ❌ | ✅ |
 | 任命/撤销管理员 | ❌ | ❌ | ❌ | ✅ |
 | 删除账号 | ❌ | ❌ | ❌ | ✅ |
 | 运维对账 / 会话清场 | ❌ | ❌ | ❌ | ✅ |
@@ -319,7 +330,9 @@ flowchart LR
 1. **数字 role 是权威**，Sa-Token 角色标识由 `StpInterface` 派生（§6.3.1）；
 2. 角色只从服务端会话解析，**不接受任何前端传参**；
 3. 教师与管理员**只能操作数据库层面的用户信息，不得直接访问学生 OSS 前缀**；需要读取学生文件的能力属于第二阶段，且必须经由 §13 的作业关系授权，而不是靠角色；
-4. 超级管理员账号由系统启动时初始化，**不可删除、不可禁用、不可降级**；首次登录强制改密。
+4. 超级管理员账号由系统启动时初始化，**不可删除、不可禁用、不可降级**；首次登录强制改密；
+5. **公告的下发权只给超管**：公告会影响全站每一个人（紧急公告还会强制弹窗打断操作），
+   这个权力不适合下放给普通管理员或机房教师。
 
 ---
 
@@ -1105,6 +1118,7 @@ erDiagram
     FILE_ENTRY ||--o{ FILE_ENTRY : "parent_id 自关联"
     FILE_ENTRY ||--o| UPLOAD_SESSION : "commit 后关联"
     CAPTCHA_IMAGE ||..|| SYS_USER : "created_by 管理员维护"
+    SYS_USER ||--o{ ANNOUNCEMENT : "created_by 超管发布"
     SYS_USER {
         BIGINT id PK
         VARCHAR username "登录名（学号）"
@@ -1119,6 +1133,7 @@ erDiagram
         BIGINT storage_quota
         BIGINT used_storage "缓存值"
         TINYINT pwd_changed "0需强制改密"
+        DATETIME avatar_updated_at "头像冷却基准"
     }
     FILE_ENTRY {
         BIGINT id PK
@@ -1180,6 +1195,7 @@ CREATE TABLE sys_user (
   password        VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文（强度 10）',
   nickname        VARCHAR(50)  DEFAULT NULL COMMENT '昵称',
   avatar_key      VARCHAR(512) DEFAULT NULL COMMENT '自定义头像在 OSS 的 ObjectKey',
+  avatar_updated_at DATETIME   DEFAULT NULL COMMENT '头像最近一次修改/清除时间（24 小时冷却基准，见 R15）',
   signature       VARCHAR(255) DEFAULT NULL COMMENT '个性签名',
   gender          TINYINT      NOT NULL DEFAULT 0 COMMENT '性别：0未知 1男 2女',
   birthday        DATE         DEFAULT NULL COMMENT '生日',
@@ -1298,6 +1314,28 @@ CREATE TABLE email_send_log (
   create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_email_time (email, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='邮件发送审计';
+
+-- ---------- 系统公告（R20） ----------
+-- 只有超管能写；用户端只读"当前生效"的那部分。
+CREATE TABLE announcement (
+  id           BIGINT       PRIMARY KEY AUTO_INCREMENT,
+  title        VARCHAR(120) NOT NULL COMMENT '标题',
+  content      TEXT         NOT NULL COMMENT '纯文本正文（不接受 HTML，前端按换行渲染）',
+  level        TINYINT      NOT NULL DEFAULT 1 COMMENT '注意力分级：1普通 2重要 3紧急',
+  status       TINYINT      NOT NULL DEFAULT 0 COMMENT '0草稿 1已发布 2已撤回',
+  publish_time DATETIME     DEFAULT NULL COMMENT '发布时间；为空视为"发布即可见"',
+  expire_time  DATETIME     DEFAULT NULL COMMENT '过期时间；为空表示不过期（一直生效到手动撤回）',
+  created_by   BIGINT       DEFAULT NULL COMMENT '发布人 sys_user.id（超管）',
+  create_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_status_level (status, level, publish_time),
+  KEY idx_publish_time (publish_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统公告';
+
+-- 说明：
+--   1) 本表**物理删除**，不设 deleted —— "撤回"已经是软删除语义（status=2），
+--      再叠一层逻辑删除会让所有查询都多带一个条件，不划算；公告表也长不大。
+--   2) 迁移脚本：全新部署走 init.sql；已有库走 migration_v2.2.sql（幂等）。
 ```
 
 **关于删除的字段**
@@ -3987,6 +4025,8 @@ CREATE TABLE submission (
 | 40090 | 导入文件格式错误（非 CSV / 编码无法识别） | 200 |
 | 40091 | 导入数据校验失败 | 200 |
 | 40092 | 导入行数或文件大小超限 | 200 |
+| 40094 | 公告不存在 | 200 |
+| 40095 | 公告当前状态不允许该操作（已发布需先撤回） | 200 |
 | 40100 | 未登录 / 会话已失效 | **401** |
 | 40101 | 验证码已过期或不存在，请重新获取 | 200 |
 | 40102 | 图片验证码答案错误 | 200 |
@@ -4005,6 +4045,7 @@ CREATE TABLE submission (
 | 40120 | 超级管理员账号受保护，禁止该操作 | 200 |
 | 40121 | 学号已存在 | 200 |
 | 40122 | 自助注册未开放 | 200 |
+| 40123 | 头像修改过于频繁（每 24 小时限一次） | 200 |
 | 40300 | 无权限访问该资源 / 无后台角色权限 | **403** |
 | 50000 | 服务器内部错误 | 500 |
 | 50010 | OSS 服务异常 | 200 |
@@ -4049,6 +4090,9 @@ CREATE TABLE submission (
 | `app.upload.min-free-bytes` | 1048576 | — | 剩余空间低于此值拒绝签发凭证 |
 | `app.upload.upload-token-seconds` | 7200 | — | uploadToken 有效期；必须够传完一个大文件 |
 | `app.upload.instant-threshold-bytes` | 209715200 | — | 超过则用抽样指纹 |
+| `app.upload.transfer-limits.video` | 104857600 | — | 视频类单独上限（100MB）；经 `GET /oss/upload-config` 下发前端预检 |
+| `app.upload.transfer-limits.archive` | 104857600 | — | 压缩包单独上限（100MB）；其余后缀用全局 `max-file-size` |
+| `app.upload.folder-max-total-bytes` | 52428800 | — | 一次上传整个文件夹的总大小上限（50MB） |
 | `app.captcha.image-url-expire-seconds` | 300 | — | 验证码图签名有效期 |
 | `app.captcha.max-fail` | 3 | — | 单题最多错误次数 |
 | `app.captcha.click-tolerance-px` | 30 | — | 点选容差（原图坐标） |

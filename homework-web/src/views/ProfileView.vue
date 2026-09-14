@@ -18,12 +18,17 @@
       <div class="col-left">
         <section class="sc-surface card identity">
           <div class="avatar-wrap">
-            <div class="avatar" :class="{ clickable: true }" @click="pickAvatar">
+            <div
+              class="avatar"
+              :class="{ clickable: true, locked: avatarLocked }"
+              :title="avatarLocked ? avatarLockedText : '点击更换头像'"
+              @click="pickAvatar"
+            >
               <img v-if="avatarUrl" :src="avatarUrl" alt="头像" @error="avatarFailed = true" />
               <span v-else class="initial">{{ initial }}</span>
               <div class="avatar-hover">
-                <el-icon><Camera /></el-icon>
-                <span>更换</span>
+                <el-icon><component :is="avatarLocked ? Lock : Camera" /></el-icon>
+                <span>{{ avatarLocked ? '冷却中' : '更换' }}</span>
               </div>
             </div>
             <input
@@ -49,12 +54,36 @@
           </div>
 
           <div class="avatar-actions">
-            <el-button size="small" @click="pickAvatar">上传头像</el-button>
-            <el-button v-if="profile.avatarKey" size="small" type="danger" plain @click="clearAvatar">
+            <el-button size="small" :disabled="avatarLocked" @click="pickAvatar">上传头像</el-button>
+            <el-button
+              v-if="profile.avatarKey"
+              size="small"
+              type="danger"
+              plain
+              :disabled="avatarLocked"
+              @click="clearAvatar"
+            >
               清除
             </el-button>
           </div>
-          <p class="hint sc-muted">仅支持 JPG / PNG，不超过 5MB。换头像时服务端会自动删掉旧图。</p>
+
+          <!--
+            冷却说明必须写在界面上，而不只是"点了报错"：
+            用户看到按钮灰掉但不知道为什么，比看到限制原因更让人恼火。
+          -->
+          <el-alert
+            v-if="avatarLocked"
+            class="avatar-lock"
+            type="warning"
+            :closable="false"
+            show-icon
+            :title="`头像每 ${AVATAR_CHANGE_INTERVAL_HOURS} 小时只能修改一次`"
+            :description="`还剩 ${formatRemain(avatarRemainMs)}，${stampText} 之后可再次修改。限制是为了防止恶意用户把头像当免费图床反复刷图。`"
+          />
+          <p v-else class="hint sc-muted">
+            仅支持 JPG / PNG，不超过 5MB。换头像时服务端会自动删掉旧图。
+            为防止恶意刷图，<strong>每 {{ AVATAR_CHANGE_INTERVAL_HOURS }} 小时只能修改一次</strong>。
+          </p>
         </section>
 
         <!-- 容量环形图：纯 SVG，方便用品牌渐变描边 -->
@@ -119,6 +148,21 @@
               <p class="sc-muted">定期更换密码，公用电脑上尤其重要</p>
             </div>
             <el-button @click="router.push('/change-password')">修改</el-button>
+          </div>
+          <div class="security-row">
+            <div>
+              <strong>头像修改冷却</strong>
+              <p class="sc-muted">
+                {{
+                  avatarLocked
+                    ? `还要等 ${formatRemain(avatarRemainMs)}，${stampText} 后可再次修改`
+                    : `现在可以修改；每 ${AVATAR_CHANGE_INTERVAL_HOURS} 小时限一次`
+                }}
+              </p>
+            </div>
+            <el-tag size="small" effect="plain" :type="avatarLocked ? 'warning' : 'success'">
+              {{ avatarLocked ? '冷却中' : '可修改' }}
+            </el-tag>
           </div>
           <div class="security-row">
             <div>
@@ -220,18 +264,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Camera, Delete, Refresh } from '@element-plus/icons-vue'
+import { Camera, Delete, Lock, Refresh } from '@element-plus/icons-vue'
 import { userApi } from '@/api'
-import { ApiError } from '@/api/http'
+import { ApiError, CODE } from '@/api/http'
 import { useUserStore } from '@/stores/user'
 import { ROLE_LABELS, type ProfileUpdateVO } from '@/types/api'
-import { formatSize } from '@/utils/format'
+import { formatRemain, formatSize, parseBackendTime } from '@/utils/format'
 
 const router = useRouter()
 const user = useUserStore()
+
+/**
+ * 头像修改的最小间隔（小时），与后端 `AvatarRules.CHANGE_INTERVAL_HOURS` 一致。
+ * 前端拿它**只做文案**：真正拦人的是服务端，所以即使这里写错也不会被绕过。
+ */
+const AVATAR_CHANGE_INTERVAL_HOURS = 24
 
 const loading = ref(false)
 const saving = ref(false)
@@ -351,7 +401,43 @@ async function save() {
 
 // ------------------------------------------------ 头像
 
+/**
+ * 头像冷却。
+ *
+ * 服务端返回的是"下次可修改时间"（`avatarChangeableAt`，null = 现在就能改），
+ * 前端据此置灰按钮并显示倒计时。`now` 每 30 秒走一次，让"还剩 X 小时"是活的 ——
+ * 否则用户干等着页面不动，会以为卡住了。
+ */
+const now = ref(Date.now())
+let ticker: number | undefined
+
+const avatarChangeableAt = computed(() => parseBackendTime(profile.value?.avatarChangeableAt))
+const avatarRemainMs = computed(() => {
+  const at = avatarChangeableAt.value
+  return at ? Math.max(0, at.getTime() - now.value) : 0
+})
+const avatarLocked = computed(() => avatarRemainMs.value > 0)
+
+/** `2026-02-14 10:30` 形式的时间点 */
+const stampText = computed(() => {
+  const at = avatarChangeableAt.value
+  if (!at) {
+    return ''
+  }
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+})
+
+const avatarLockedText = computed(
+  () => `头像每 ${AVATAR_CHANGE_INTERVAL_HOURS} 小时只能修改一次，还要等 ${formatRemain(avatarRemainMs.value)}`,
+)
+
 function pickAvatar() {
+  if (avatarLocked.value) {
+    // 不在冷却时静默失败：按钮虽然置灰了，头像本身也是可点的
+    ElMessage.warning(avatarLockedText.value)
+    return
+  }
   avatarInput.value?.click()
 }
 
@@ -378,8 +464,13 @@ async function onAvatarPicked(event: Event) {
     user.profile = updated
     // avatarVersion 变了，之前的加载失败记录要清掉
     avatarFailed.value = false
+    now.value = Date.now()
     ElMessage.success('头像已更新')
   } catch (error) {
+    if (error instanceof ApiError && error.code === CODE.AVATAR_TOO_FREQUENT) {
+      // 别人在另一台设备改过 / 本地时间不准：以服务端为准刷新一次冷却状态
+      void load()
+    }
     ElMessage.error(error instanceof ApiError ? error.message : '头像上传失败')
   } finally {
     loading.value = false
@@ -387,10 +478,16 @@ async function onAvatarPicked(event: Event) {
 }
 
 async function clearAvatar() {
+  if (avatarLocked.value) {
+    ElMessage.warning(avatarLockedText.value)
+    return
+  }
   try {
-    await ElMessageBox.confirm('将删除当前头像（对象存储里的文件也会一并删除）。', '清除头像', {
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      `将删除当前头像（对象存储里的文件也会一并删除）。清除后同样要等 ${AVATAR_CHANGE_INTERVAL_HOURS} 小时才能再次修改。`,
+      '清除头像',
+      { type: 'warning' },
+    )
   } catch {
     return
   }
@@ -398,13 +495,28 @@ async function clearAvatar() {
     const updated = await userApi.clearAvatar()
     user.profile = updated
     avatarFailed.value = false
+    now.value = Date.now()
     ElMessage.success('已清除头像')
   } catch (error) {
+    if (error instanceof ApiError && error.code === CODE.AVATAR_TOO_FREQUENT) {
+      void load()
+    }
     ElMessage.error(error instanceof ApiError ? error.message : '清除失败')
   }
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  void load()
+  ticker = window.setInterval(() => {
+    now.value = Date.now()
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (ticker !== undefined) {
+    window.clearInterval(ticker)
+  }
+})
 </script>
 
 <style scoped>
@@ -486,6 +598,17 @@ onMounted(() => void load())
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 冷却中：手型变成禁止，但保留 hover 提示（点下去会告诉用户还要等多久） */
+.avatar.locked {
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.avatar-lock {
+  margin-top: 12px;
+  text-align: left;
 }
 
 .avatar-hover {

@@ -25,13 +25,16 @@ public final class AuthVo {
      *       {@code ?v=} 会变）。</li>
      * </ul>
      * 若客户端能自行设置请求头，也可以直接用稳定地址 {@code GET /api/user/avatar/{userId}}。
+     * <p>{@code avatarChangeableAt}：头像的下次可修改时间；为 {@code null} 表示现在就能改。
+     * 头像有 24 小时冷却期（防恶意用户刷图），前端据此展示"还需等待多久"的说明。
      */
     public record UserProfileVo(Long userId, String username, String studentNo, String realName,
                                 String className, String nickname, String email,
                                 String avatarKey, String avatarUrl, String avatarVersion,
                                 String signature, Integer gender, LocalDate birthday,
                                 Integer role, long quota, long used, long free, long recycleUsed,
-                                int idleLogoutMinutes, int checkoutWarnMinutes) {
+                                int idleLogoutMinutes, int checkoutWarnMinutes,
+                                java.time.LocalDateTime avatarChangeableAt) {
     }
 
     public record QuotaVo(long quota, long used, long free, long recycleUsed) {

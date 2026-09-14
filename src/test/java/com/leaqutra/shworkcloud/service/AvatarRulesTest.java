@@ -9,9 +9,11 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -168,5 +170,63 @@ class AvatarRulesTest {
         assertTrue(!OssReconcileService.isAvatarKey("homework/1001/a.png"));
         assertTrue(!OssReconcileService.isAvatarKey(null));
         assertTrue(!OssReconcileService.isAvatarKey(""));
+    }
+
+    // ------------------------------------------------------------ 24 小时冷却
+
+    @Test
+    @DisplayName("头像冷却：从未改过 → 立即可改（返回 null）")
+    void cooldownAllowsFirstChange() {
+        assertNull(AvatarRules.nextChangeableAt(null));
+        assertNull(AvatarRules.ensureChangeAllowed(null));
+    }
+
+    @Test
+    @DisplayName("头像冷却：刚改过 → 被拒，且提示里给出还要等多久（期望 40123）")
+    void cooldownRejectsRecentChange() {
+        LocalDateTime justNow = LocalDateTime.now().minusMinutes(5);
+        assertEquals(justNow.plusHours(AvatarRules.CHANGE_INTERVAL_HOURS),
+                AvatarRules.nextChangeableAt(justNow));
+
+        BizException e = assertThrows(BizException.class,
+                () -> AvatarRules.ensureChangeAllowed(justNow));
+        assertEquals(ErrorCode.AVATAR_CHANGE_TOO_FREQUENT, e.getErrorCode());
+        assertTrue(e.getMessage().contains("24 小时"), e.getMessage());
+        assertTrue(e.getMessage().contains("小时后"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("头像冷却：满 24 小时后放行；差一分钟仍拒绝")
+    void cooldownBoundary() {
+        LocalDateTime justOver = LocalDateTime.now().minusHours(AvatarRules.CHANGE_INTERVAL_HOURS)
+                .minusMinutes(1);
+        assertDoesNotThrow(() -> AvatarRules.ensureChangeAllowed(justOver));
+
+        LocalDateTime oneMinuteShort = LocalDateTime.now()
+                .minusHours(AvatarRules.CHANGE_INTERVAL_HOURS).plusMinutes(1);
+        assertThrows(BizException.class, () -> AvatarRules.ensureChangeAllowed(oneMinuteShort));
+    }
+
+    // ------------------------------------------------------------ 资料里的冷却字段
+
+    @Test
+    @DisplayName("avatarChangeableAt：从未改过 / 冷却已过 → null（表示现在就能改）")
+    void changeableAtIsNullWhenAvailable() {
+        assertNull(UserService.avatarChangeableAt(null));
+        // 上个星期改的：nextChangeableAt 会返回一个过去的时间点，
+        // 但对外语义必须是"现在就能改"，所以这里要收敛成 null
+        assertNull(UserService.avatarChangeableAt(LocalDateTime.now().minusDays(7)));
+        assertNull(UserService.avatarChangeableAt(
+                LocalDateTime.now().minusHours(AvatarRules.CHANGE_INTERVAL_HOURS).minusMinutes(1)));
+    }
+
+    @Test
+    @DisplayName("avatarChangeableAt：冷却中 → 给出 24 小时后的时间点")
+    void changeableAtIsFutureWhileCooling() {
+        LocalDateTime changedAt = LocalDateTime.now().minusHours(2);
+        LocalDateTime at = UserService.avatarChangeableAt(changedAt);
+        assertNotNull(at);
+        assertEquals(changedAt.plusHours(AvatarRules.CHANGE_INTERVAL_HOURS), at);
+        assertTrue(at.isAfter(LocalDateTime.now()));
     }
 }

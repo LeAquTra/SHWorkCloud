@@ -74,6 +74,13 @@ const routes: RouteRecordRaw[] = [
         meta: { roles: ADMIN_ROLES, title: '验证码题库' },
       },
       {
+        path: 'announcements',
+        name: 'admin-announcements',
+        component: () => import('@/views/admin/AnnouncementManageView.vue'),
+        // 公告会影响全站每一个人（紧急公告还会强制弹窗打断操作），只给超管
+        meta: { roles: SUPER_ADMIN_ROLES, title: '公告管理' },
+      },
+      {
         path: 'ops',
         name: 'admin-ops',
         component: () => import('@/views/admin/OpsView.vue'),

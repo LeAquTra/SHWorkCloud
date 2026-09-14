@@ -3,6 +3,9 @@ import { get, post, put, del, getBlob } from './http'
 import type {
   AdminUpdateProfileReq,
   AdminUserVO,
+  AnnouncementActiveVO,
+  AnnouncementManageVO,
+  AnnouncementUpsertReq,
   BreadcrumbVO,
   CaptchaImageVO,
   CaptchaVO,
@@ -203,6 +206,16 @@ export const uploadApi = {
   }) => post<CommitVO>('/files/commit', body),
 }
 
+// ---------------------------------------------------------------- 公告
+
+export const announcementApi = {
+  /**
+   * 当前生效的公告（已发布、已到时间、未过期），按注意力分级降序。
+   * 任何已登录用户都能拿 —— 公告就是发给所有人的。
+   */
+  active: () => get<AnnouncementActiveVO[]>('/announcements/active'),
+}
+
 // ---------------------------------------------------------------- 后台
 
 export const adminApi = {
@@ -273,4 +286,21 @@ export const adminApi = {
     post<SessionFlushVO>('/admin/ops/sessions/flush', { ipPrefix }),
   reconcileStorage: () => post<ReconcileVO>('/admin/ops/reconcile-storage', {}),
   configSummary: () => get<Record<string, unknown>>('/admin/ops/config-summary'),
+
+  // ------------------------------------------------ 公告（仅超级管理员）
+
+  announcements: (query: Record<string, unknown>) =>
+    get<PageVO<AnnouncementManageVO>>('/admin/announcements', query),
+  announcement: (id: number) => get<AnnouncementManageVO>(`/admin/announcements/${id}`),
+  /** 新建后是**草稿**，还要再调 publish 才对用户可见 */
+  createAnnouncement: (body: AnnouncementUpsertReq) => post<number>('/admin/announcements', body),
+  /**
+   * 修改公告。
+   * ⚠️ 后端只允许改**草稿/已撤回**的公告；已发布的必须先撤回（避免用户看到的公告被静默改内容）。
+   */
+  updateAnnouncement: (id: number, body: AnnouncementUpsertReq) =>
+    put<void>(`/admin/announcements/${id}`, body),
+  publishAnnouncement: (id: number) => put<void>(`/admin/announcements/${id}/publish`),
+  recallAnnouncement: (id: number) => put<void>(`/admin/announcements/${id}/recall`),
+  deleteAnnouncement: (id: number) => del<void>(`/admin/announcements/${id}`),
 }

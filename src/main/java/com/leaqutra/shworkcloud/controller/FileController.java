@@ -189,7 +189,8 @@ public class FileController {
 
     /**
      * 在线阅览文本 / Office 正文。
-     * <p>返回已解码的文本（自动识别 GBK 与 UTF-8 BOM）；doc/docx/pptx 提取纯文本（排版会丢失）。
+     * <p>返回已解码的文本（自动识别 GBK 与 UTF-8 BOM）；doc/docx/pptx/xlsx 提取纯文本
+     * （排版会丢失），其中 docx / xlsx 另带服务端渲染的 {@code html}（近似原格式）。
      * 超过大小上限返回 40082，并提示下载后查看。
      */
     @GetMapping("/files/{id}/text")
