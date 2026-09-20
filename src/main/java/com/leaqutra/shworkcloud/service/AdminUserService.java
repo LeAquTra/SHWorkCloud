@@ -9,7 +9,10 @@ import com.leaqutra.shworkcloud.common.PageVO;
 import com.leaqutra.shworkcloud.dto.AdminUserQuery;
 import com.leaqutra.shworkcloud.entity.FileEntry;
 import com.leaqutra.shworkcloud.entity.SysUser;
+import com.leaqutra.shworkcloud.mapper.ChatMessageMapper;
 import com.leaqutra.shworkcloud.mapper.FileEntryMapper;
+import com.leaqutra.shworkcloud.mapper.FriendRelationMapper;
+import com.leaqutra.shworkcloud.mapper.PostMapper;
 import com.leaqutra.shworkcloud.mapper.UserMapper;
 import com.leaqutra.shworkcloud.security.LoginUser;
 import com.leaqutra.shworkcloud.security.PasswordGenerator;
@@ -51,6 +54,16 @@ public class AdminUserService {
     private final OssSignService ossSignService;
     private final AuditService auditService;
     private final LoginUser loginUser;
+    /**
+     * 删号时要一并清掉好友关系与（彻底删除时的）聊天消息，否则会留下
+     * 指向不存在用户的孤儿数据。这里直接用 Mapper 而不注入 FriendService/ChatService：
+     * 那两个服务是"用户视角"的业务入口，删号属于后台的级联清理，
+     * 走 Mapper 更直接，也不会让 Service 之间形成环。
+     */
+    private final FriendRelationMapper friendRelationMapper;
+    private final ChatMessageMapper chatMessageMapper;
+    /** 删号时清理其社区帖子（仅彻底删除），理由见 deleteUser 的实现注释 */
+    private final PostMapper postMapper;
 
     /** 后台代改资料时允许修改的字段（顺序即文档顺序） */
     private static final Set<String> EDITABLE_FIELDS =
@@ -250,8 +263,27 @@ public class AdminUserService {
         userCache.evict(id);
         StpUtil.kickout(id);
         StpUtil.disable(id, -1);
+
+        // 好友关系必须一并清掉：好友查询是 JOIN sys_user 的，
+        // 被删账号的 sys_user 行虽然还在（逻辑删除），但 JOIN 条件里的
+        // deleted = 0 会让对方列表里那一行直接消失 —— 于是"好友数"与
+        // "列表条数"对不上，名额被一个看不见的人占着，用户没法自己修。
+        // 物理删除这些边：账号都没了，留痕没有意义，反而一直占着 uk_edge。
+        int friendEdges = friendRelationMapper.deleteAllEdgesOf(id);
+
+        // 消息只在"彻底删除"时清：逻辑删除下保留聊天记录，双方还能回看历史；
+        // 彻底删除意味着这个账号不会回来了，留下孤儿消息只会让
+        // 会话列表里出现一个永远打不开的会话。
+        int messages = purgeFiles ? chatMessageMapper.deleteAllOf(id) : 0;
+
+        // 社区帖子与好友边同理：好友边一定清（否则名额被看不见的人占着），
+        // 帖子只在彻底删除时清 —— 逻辑删除下保留帖子，作者名会走
+        // UserCardAssembler.deletedUserCard 显示成"已注销用户"。
+        int posts = purgeFiles ? postMapper.deleteAllOfAuthor(id) : 0;
+
         auditService.log(loginUser.id(), "USER_DELETE", "USER", String.valueOf(id),
-                clientIp, true, "purgeFiles=%s,fileCount=%d".formatted(purgeFiles, fileCount));
+                clientIp, true, "purgeFiles=%s,fileCount=%d,friendEdges=%d,messages=%d,posts=%d"
+                        .formatted(purgeFiles, fileCount, friendEdges, messages, posts));
     }
 
     public long recalcStorage(Long id, String clientIp) {

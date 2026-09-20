@@ -46,7 +46,7 @@
 <script setup lang="ts">
 import { computed, onMounted, type Component } from 'vue'
 import { useRoute } from 'vue-router'
-import { Bell, InfoFilled, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
+import { Bell, ChatLineSquare, InfoFilled, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AnnouncementCenter from '@/components/AnnouncementCenter.vue'
 import { useUserStore } from '@/stores/user'
@@ -71,6 +71,9 @@ const navItems = computed<NavItem[]>(() => {
     items.push({ to: '/admin/users', label: '用户管理', icon: User })
   }
   items.push({ to: '/admin/import', label: '学生名单导入', icon: UploadFilled })
+  // 社区审核对所有后台角色开放（教师及以上）：教师是机房管理员，
+  // 课堂上需要能处理学生发的内容。与路由 meta.roles / 后端 @SaCheckRole 一致。
+  items.push({ to: '/admin/posts', label: '社区审核', icon: ChatLineSquare })
   if (user.isAdmin) {
     items.push({ to: '/admin/captchas', label: '验证码题库', icon: Picture })
   }

@@ -7,6 +7,7 @@ import com.leaqutra.shworkcloud.service.ContentDisposition;
 import com.leaqutra.shworkcloud.service.DownloadTarget;
 import com.leaqutra.shworkcloud.service.UserService;
 import com.leaqutra.shworkcloud.vo.AuthVo;
+import com.leaqutra.shworkcloud.vo.FriendVo;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -107,6 +108,24 @@ public class UserController {
                 out.flush();
             }
         }
+    }
+
+    /**
+     * 查看<b>别人</b>的公开主页（社区里点作者头像、好友列表点某人都走它）。
+     * <p>
+     * <b>字段是收窄过的</b>：只有昵称/姓名/班级/头像/签名/角色，以及"我与 TA 的关系"，
+     * <b>没有</b>邮箱、生日、性别、容量、已用空间等 —— 详见
+     * {@link UserService#publicProfile(long)} 的说明。
+     * <p>
+     * 路径用 {@code /user/{id}/profile} 而不是 {@code /user/profile/{id}}：
+     * 与既有的 {@code GET /user/avatar/{userId}} 保持"资源在前、子资源在后"的一致形状，
+     * 也避免与 {@code GET /user/profile} 产生路径歧义。
+     * <p>注意：{@code /user/quota} 是固定路径，Spring 会优先精确匹配，
+     * 不会被这里的 {@code {userId}} 抢走。
+     */
+    @GetMapping("/{userId}/profile")
+    public R<FriendVo.UserCard> publicProfile(@PathVariable Long userId) {
+        return R.ok(userService.publicProfile(userId));
     }
 
     /** 上传前的容量预检；同时给出回收站占用，便于提示"清空可释放" */

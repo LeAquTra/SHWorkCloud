@@ -7,6 +7,7 @@ import com.leaqutra.shworkcloud.entity.SysUser;
 import com.leaqutra.shworkcloud.mapper.UserMapper;
 import com.leaqutra.shworkcloud.security.LoginUser;
 import com.leaqutra.shworkcloud.vo.AuthVo;
+import com.leaqutra.shworkcloud.vo.FriendVo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,8 @@ public class UserService {
     private final AuditService auditService;
     private final AvatarService avatarService;
     private final LoginUser loginUser;
+    /** 装配他人主页的名片。不注入 FriendService，避免与它形成循环依赖 */
+    private final UserCardAssembler cardAssembler;
 
     public AuthVo.UserProfileVo profile() {
         long userId = loginUser.id();
@@ -45,6 +48,29 @@ public class UserService {
             throw new BizException(ErrorCode.FORBIDDEN);
         }
         return toVo(user);
+    }
+
+    /**
+     * 查看<b>别人</b>的公开主页。
+     * <p>
+     * 与 {@link #profile()} 的关键区别是<b>字段大幅收窄</b>：只返回
+     * {@link com.leaqutra.shworkcloud.vo.FriendVo.UserCard}（昵称/姓名/班级/头像/
+     * 签名/角色/与我的关系），<b>不含</b>邮箱、生日、性别、容量、已用空间、
+     * 最后登录 IP 等 —— 看别人的主页不需要这些，而多给一个字段就是多一条泄露路径。
+     * <p>
+     * 学号（{@code username}）是<b>有意保留</b>的：教室里本来就互相知道学号，
+     * 且好友搜索需要靠它精确找人。若后续判定敏感，从这里删掉即可（搜索接口会一并失效）。
+     * <p>
+     * 被禁用或已注销的用户不返回昵称头像，直接报"不存在或已不可用"：
+     * 否则被禁用的人仍能被别人访问主页，等于禁用没生效。
+     */
+    public FriendVo.UserCard publicProfile(long targetId) {
+        SysUser user = userMapper.selectById(targetId);
+        if (user == null || user.getStatus() == null || user.getStatus() != 1) {
+            throw new BizException(ErrorCode.FRIEND_TARGET_NOT_FOUND);
+        }
+        long me = loginUser.id();
+        return cardAssembler.toCard(user, cardAssembler.relationOf(me, targetId), null);
     }
 
     /**

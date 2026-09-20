@@ -1,6 +1,6 @@
 -- ============================================================================
 --  作业云盘 SHWorkCloud —— 一键初始化脚本
---  版本：v2.1        日期：2026-09-11
+--  版本：v2.3        日期：2026-09-20
 --  对应设计文档：docs/SHWordCloud_Standard_v2.0.md §5
 --
 --  用法（全新部署，一条命令搞定）：
@@ -18,6 +18,10 @@
 --     生产环境预置题目等于把验证码答案公开在源码里。
 --
 --  如果你的库是 v2.0 时建的，请改用 migration_v2.1.sql 做增量升级。
+--  如果你的库是 v2.2 及更早的，再补 migration_v2.3.sql（好友与私聊）、
+--  migration_v2.4.sql（社区帖子）。
+--  ⚠️ 本脚本是 idempotent 的合并版：它建的表已经包含 v2.1 ~ v2.4 的全部结构，
+--     因此 **全新部署只需跑这一个文件**，不必再逐个执行 migration_v2.*。
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -234,7 +238,84 @@ CREATE TABLE IF NOT EXISTS `announcement` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统公告';
 
 -- ---------------------------------------------------------------------------
--- 10. 可选：创建最小权限的应用账号（生产环境推荐，不用 root 连库）
+-- 10. 好友关系表（有向边 + 双向行）
+-- ---------------------------------------------------------------------------
+-- 一行表示「user_id 的列表里有 friend_id 这个人」，好友关系存两行
+-- （A→B 与 B→A），互为好友 = 两条边的 status 都是 1。
+-- 为什么不用「一行一对用户」：那样查"我的好友"要写 `user_id=? OR friend_id=?`，
+-- OR 用不上索引；而且必须额外存"申请是谁发的"，否则容易写出"半好友"状态。
+-- status：0 待对方接受 / 1 已是好友；拒绝 = 删掉待处理行（故无 status=2，
+-- 好处是"拒绝后仍可再次申请"，不留永久黑名单语义）。
+-- 🔴 本表没有 deleted 列、删除一律物理删除：uk_edge 是唯一键，而 MySQL 不支持
+-- 条件唯一键 —— 软删除的行会继续占着键，导致"拒绝后再申请"撞 Duplicate entry。
+-- 详见 migration_v2.3.sql 的注释。
+CREATE TABLE IF NOT EXISTS `friend_relation` (
+  `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '关系ID',
+  `user_id`     BIGINT      NOT NULL COMMENT '归属方：本行属于谁的列表',
+  `friend_id`   BIGINT      NOT NULL COMMENT '对方用户ID',
+  `status`      TINYINT     NOT NULL DEFAULT 0 COMMENT '0待对方接受 1已是好友',
+  `create_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申请时间',
+  `update_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP COMMENT '成为好友/变更时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_edge` (`user_id`, `friend_id`),
+  KEY `idx_user_status_friend` (`user_id`, `status`, `friend_id`),
+  KEY `idx_friend_status` (`friend_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='好友关系（有向边，好友存双向两行）';
+
+-- ---------------------------------------------------------------------------
+-- 11. 好友私聊消息表
+-- ---------------------------------------------------------------------------
+-- 只存文字：content 是纯文本，前端按换行渲染，绝不下发/渲染 HTML。
+-- id 同时充当增量拉取的游标（前端记 lastId，只拉比它大的）。
+-- read_flag：0 未读 1 已读；已读是"整条会话一次性置位"，不做单条回执。
+CREATE TABLE IF NOT EXISTS `chat_message` (
+  `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '消息ID（兼作增量拉取游标）',
+  `from_user`   BIGINT        NOT NULL COMMENT '发送者用户ID（取自 Sa-Token 会话）',
+  `to_user`     BIGINT        NOT NULL COMMENT '接收者用户ID',
+  `content`     VARCHAR(1000) NOT NULL COMMENT '纯文本正文（不存 HTML）',
+  `read_flag`   TINYINT       NOT NULL DEFAULT 0 COMMENT '0未读 1已读',
+  `create_time` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_to_read_id` (`to_user`, `read_flag`, `id`),
+  KEY `idx_from_to_id` (`from_user`, `to_user`, `id`),
+  KEY `idx_to_from_id` (`to_user`, `from_user`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='好友私聊消息（仅文字）';
+
+-- ---------------------------------------------------------------------------
+-- 12. 社区帖子表（文字动态 + 审核）
+-- ---------------------------------------------------------------------------
+-- 状态机与 announcement 同构，维护者只需要理解一套规则：
+--     发帖 ──▶ 0 待审核 ──approve──▶ 1 已通过 ──编辑──▶ 0 待审核（重新排队）
+--                 │                    │
+--                 │                    └──reject──▶ 2 已拒绝
+--                 └──reject──▶ 2 已拒绝 ──编辑──▶ 0 待审核
+-- 三条关键约束：
+--   1) 用户发帖一律落为「待审核」，绝不允许直接可见；
+--   2) **已通过的帖子被编辑后必须回到待审核** —— 否则作者可以先用正常内容过审、
+--      再换成任何东西，审核形同虚设；
+--   3) 审核结果保留数据（reviewed_by / review_time / reject_reason），可追溯。
+-- content 是纯文本，不存 HTML；链接在读取时由 LinkSegmenter 解析成分段下发。
+CREATE TABLE IF NOT EXISTS `post` (
+  `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '帖子ID',
+  `author_id`     BIGINT       NOT NULL COMMENT '作者用户ID',
+  `content`       TEXT         NOT NULL COMMENT '正文（纯文本，不存 HTML；链接由服务端解析）',
+  `link_count`    INT          NOT NULL DEFAULT 0 COMMENT '正文里的链接数（供审核筛选）',
+  `status`        TINYINT      NOT NULL DEFAULT 0 COMMENT '0待审核 1已通过 2已拒绝',
+  `reviewed_by`   BIGINT       DEFAULT NULL COMMENT '审核人用户ID；未审核为 NULL',
+  `review_time`   DATETIME     DEFAULT NULL COMMENT '审核时间；未审核为 NULL',
+  `reject_reason` VARCHAR(200) DEFAULT NULL COMMENT '拒绝理由（仅 status=2 时有值，作者可见）',
+  `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发布时间',
+  `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                               ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_status_id` (`status`, `id`),
+  KEY `idx_author_status_id` (`author_id`, `status`, `id`),
+  KEY `idx_status_review` (`status`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='社区帖子（文字动态，需审核）';
+
+-- ---------------------------------------------------------------------------
+-- 13. 可选：创建最小权限的应用账号（生产环境推荐，不用 root 连库）
 -- ---------------------------------------------------------------------------
 -- 把 'YourStrongPassword' 换成强密码，并与 application-prod.yaml 的 DB_PASSWORD 一致。
 -- 只给业务必需的四类权限，不给 DROP / ALTER / GRANT。
@@ -244,17 +325,3 @@ CREATE TABLE IF NOT EXISTS `announcement` (
 -- -- 若用 Flyway/Liquibase 自动建表，再补：
 -- -- GRANT CREATE, ALTER, INDEX, REFERENCES ON `shwork_cloud`.* TO 'shwork'@'%';
 -- FLUSH PRIVILEGES;
-
--- ---------------------------------------------------------------------------
--- 11. 自检
--- ---------------------------------------------------------------------------
-SELECT '建库建表完成' AS `status`,
-       (SELECT COUNT(*) FROM information_schema.tables
-         WHERE table_schema = 'shwork_cloud') AS `table_count`,
-       @@global.time_zone AS `global_tz`,
-       @@session.time_zone AS `session_tz`,
-       @@character_set_database AS `charset`;
-
--- 期望结果：table_count = 7，charset = utf8mb4
--- 超级管理员由应用启动时创建（见 README §2.3），此处查询结果为空属正常：
-SELECT COUNT(*) AS `super_admin_count` FROM `sys_user` WHERE `role` = 9;

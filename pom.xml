@@ -18,6 +18,30 @@
 
     <properties>
         <java.version>17</java.version>
+        <!--
+          🔴 必须显式声明源码编码（真实故障，不是洁癖）。
+
+          本机 JVM 的 file.encoding / native.encoding 都是 **GBK**，而未声明
+          project.build.sourceEncoding 时 maven-compiler-plugin 会沿用平台默认编码
+          去读 .java。源文件本身是 UTF-8，于是源码里的非 ASCII **字符串字面量**
+          在编译期就被解码坏了：
+
+              private static final String PUNCT = ".,;:!?、。，；：！？…";
+              编译进 class 后变成              ".,;:!?����������"
+
+          表现是"本地测过了、跑起来判定不对"这类极难定位的问题
+          （LiveCase：LinkSegmenter 的末尾标点剥离全部失效 → 链接带着句号被当成 URL）。
+
+          为什么以前没暴露：既有源码里的中文字面量全部落在 **GBK 可表示**的范围内
+          （"下载"、"作业.docx" 这类常用汉字在 GBK 里都有码位），只有
+          "、" / "…" / emoji 这类 GBK 覆盖不全的字符才会现形。
+          也就是说这是一颗一直埋着的雷，只是没人踩到。
+
+          加上这一行后，无论 JVM 默认编码是什么，编译都用 UTF-8 读源码。
+          回归守卫：LinkSegmenterTest（含中文标点的用例）。
+        -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <mybatis-plus.version>3.5.15</mybatis-plus.version>
         <sa-token.version>1.45.0</sa-token.version>
         <aliyun-oss.version>3.17.4</aliyun-oss.version>
@@ -218,6 +242,26 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
+                    <!--
+                      🔴 显式指定源码编码（真实故障）。
+
+                      本机 JVM 的 file.encoding / native.encoding 都是 GBK，而
+                      maven-compiler-plugin 会沿用平台默认编码读 .java。源文件是 UTF-8，
+                      于是源码里的非 ASCII **字符串字面量**在编译期就被解码坏了：
+
+                          ".,;:!?、。，；：！？…"  →  ".,;:!?����������"
+
+                      表现是 LinkSegmenter 的末尾标点剥离全部失效：链接带着句号被当成 URL。
+
+                      ⚠️ 实测：maven-compiler-plugin **3.14.1 不会读**
+                      project.build.sourceEncoding 属性（properties 里已声明却无效），
+                      必须在插件 configuration 里再写一次 <encoding>。两处都留着是刻意的 ——
+                      properties 那处给其它插件（resources / surefire）看，
+                      这里这处才是真正生效的那个。
+
+                      回归守卫：LinkSegmenterTest（含中文标点的用例）。
+                    -->
+                    <encoding>UTF-8</encoding>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.projectlombok</groupId>

@@ -50,6 +50,9 @@
               <el-button link @click.stop="download(image)">
                 <el-icon><Download /></el-icon>
               </el-button>
+              <el-button link title="复制下载链接（10 分钟有效）" @click.stop="copyLink(image)">
+                <el-icon><Link /></el-icon>
+              </el-button>
             </div>
           </figcaption>
         </figure>
@@ -76,6 +79,7 @@ import { ElMessage } from 'element-plus'
 import {
   Download,
   FolderOpened,
+  Link,
   PictureFilled,
   Refresh,
   Upload,
@@ -86,6 +90,7 @@ import { fileApi, imageApi } from '@/api'
 import { ApiError } from '@/api/http'
 import type { FileItemVO, ImageItemVO } from '@/types/api'
 import { formatSize, triggerDownload } from '@/utils/format'
+import { copyDownloadLink } from '@/utils/downloadLink'
 
 /**
  * 相册页。
@@ -151,6 +156,11 @@ function open(image: ImageItemVO) {
 /** 文档里给的 parentId 就是"跳转到所在文件夹"用的 */
 async function jumpToFolder(image: ImageItemVO) {
   await router.push({ path: '/', query: { folder: String(image.parentId) } })
+}
+
+/** 复制 10 分钟有效的签名下载地址（与「下载」的区别只是不跳转、写进剪贴板） */
+async function copyLink(image: ImageItemVO) {
+  await copyDownloadLink(image.id, image.name)
 }
 
 async function download(image: ImageItemVO) {

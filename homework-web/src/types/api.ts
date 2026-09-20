@@ -445,6 +445,221 @@ export interface AnnouncementUpsertReq {
   expireTime?: string | null
 }
 
+// ---------------------------------------------------------------- 好友与私聊
+
+/**
+ * 与我某人的关系。
+ *
+ * ⚠️ 取值由服务端下发（`FriendVo.UserCard.relation`），**前端不要自己推算**：
+ * 判断关系要同时看两个方向的边（他申请我 / 我申请他 / 互为好友），
+ * 前端只拿得到自己这一侧的数据，自己算必然算错。
+ */
+export const RELATION_SELF = 'SELF'
+export const RELATION_FRIEND = 'FRIEND'
+/** 我已发出申请，等对方接受 */
+export const RELATION_OUTGOING = 'OUTGOING'
+/** 对方申请加我，等我处理 */
+export const RELATION_INCOMING = 'INCOMING'
+/** 陌生人 */
+export const RELATION_NONE = 'NONE'
+
+export type Relation =
+  | typeof RELATION_SELF
+  | typeof RELATION_FRIEND
+  | typeof RELATION_OUTGOING
+  | typeof RELATION_INCOMING
+  | typeof RELATION_NONE
+
+/**
+ * 用户名片：好友列表 / 搜索结果 / 他人主页 / 聊天窗顶栏共用。
+ *
+ * 字段是**服务端刻意收窄过的**（见 `FriendVo.UserCard` 的注释）：
+ * 没有邮箱、生日、性别、容量、最后登录 IP。前端也不要指望能拿到 ——
+ * 看别人的主页不需要这些。
+ */
+export interface UserCard {
+  userId: number
+  /** 登录名（学生即学号） */
+  username: string
+  /**
+   * 展示名：昵称 → 真实姓名 → 登录名，**由服务端算好**。
+   * 前端直接用这个，不要自己写一遍优先级（写漏一处就会显示空白名字）。
+   */
+  displayName: string
+  nickname: string | null
+  realName: string | null
+  className: string | null
+  /** 1 小时有效的 OSS 签名地址，可直接给 <img src>；没设头像时为 null */
+  avatarUrl: string | null
+  /** 头像版本串，换头像后用于绕过浏览器缓存 */
+  avatarVersion: string | null
+  signature: string | null
+  role: number
+  relation: Relation
+  /** 待处理申请的时间；只在 OUTGOING / INCOMING 下有值 */
+  requestedAt: string | null
+}
+
+/**
+ * 好友页汇总（`GET /friends`）。
+ *
+ * 名额口径：`usedSlots` = 已确认好友 + 待处理申请（收发的都算）。
+ * 服务端把"待处理申请"也计入名额，是为了避免"49 个好友 + 一堆申请同时被接受"超限。
+ */
+export interface FriendOverview {
+  friends: UserCard[]
+  /** 别人发给我、待我处理的申请 */
+  incoming: UserCard[]
+  /** 我发出、对方还没处理的申请 */
+  outgoing: UserCard[]
+  /** 上限（当前 50）。**不要在前端写死这个数字** */
+  maxFriends: number
+  usedSlots: number
+  remaining: number
+}
+
+/**
+ * 一条私聊消息。
+ *
+ * ⚠️ `content` 是**纯文本**：必须用文本插值 `{{ }}` 渲染，
+ * **绝不能 `v-html`** —— 聊天正文是用户输入，直接插 HTML 等于把 XSS 送到对方会话里。
+ */
+export interface ChatMessageVO {
+  id: number
+  fromUserId: number
+  /** 服务端算好的"是不是我发的"，前端不必比较 fromUserId */
+  mine: boolean
+  content: string
+  createTime: string
+}
+
+/**
+ * 一次会话拉取的结果（`GET /chat/messages`）。
+ *
+ * `maxId` 是**下一次请求的游标**：把它作为 `afterId` 传回去即可增量拉取。
+ * 没有新消息时服务端会把入参原样带回，所以不会被误清零。
+ */
+export interface ChatThread {
+  peer: UserCard
+  /** 按时间升序 */
+  messages: ChatMessageVO[]
+  maxId: number
+  /** 对方已读到的最大消息 id：`id <= 该值` 的己方消息显示"已读" */
+  lastReadIdByPeer: number
+  /** 仅在向上翻历史时有意义 */
+  hasMore: boolean
+}
+
+/** 会话列表项（`GET /chat/conversations`） */
+export interface ConversationVO {
+  peer: UserCard
+  lastMessage: string | null
+  lastMessageTime: string | null
+  lastFromMe: boolean
+  unread: number
+}
+
+/**
+ * 未读汇总（`GET /chat/unread`）。
+ * `total` = 未读消息 + 待处理好友申请 —— 两类都是"有人在等你"，
+ * 合成一个红点比拆成两个更容易被注意到。
+ */
+export interface ChatUnreadVO {
+  total: number
+  friends: number
+  requests: number
+}
+
+/** 个人信息页（`GET /user/{id}/profile`）返回的就是 UserCard */
+export type PublicProfileVO = UserCard
+
+// ---------------------------------------------------------------- 社区
+
+/**
+ * 帖子状态。
+ *
+ * ⚠️ **用户永远看不到自己的状态被直接改成"已通过"** —— 服务端没有"直接发布"的接口，
+ * 通过的唯一路径是管理员审核。
+ */
+export const POST_STATUS_PENDING = 0
+export const POST_STATUS_APPROVED = 1
+export const POST_STATUS_REJECTED = 2
+
+export const POST_STATUS_LABELS: Record<number, string> = {
+  [POST_STATUS_PENDING]: '待审核',
+  [POST_STATUS_APPROVED]: '已通过',
+  [POST_STATUS_REJECTED]: '已拒绝',
+}
+
+/** 正文分段：`text` 直接插值，`link` 渲染成 <a href> */
+export interface PostSegmentVO {
+  type: 'text' | 'link'
+  text: string
+  /** 仅 link 段有值，且一定以 http(s):// 开头；直接放进 href，不要再拼接 */
+  href: string | null
+}
+
+/**
+ * 一条帖子。
+ *
+ * `segments` 是「链接特殊显示」的实现：**服务端已经切好了**
+ * （`LinkSegmenter`，有 17 个单测守着边界）。前端只做一件事 ——
+ * 把 `type === 'link'` 的段渲染成 `<a>`，其余按纯文本插值。
+ *
+ * ⚠️ 绝对不要 `v-html`：正文是用户输入。也不要自己做链接正则 ——
+ * 那样"什么算链接"就有两份实现，迟早不一致。
+ */
+export interface PostVO {
+  id: number
+  author: UserCard
+  /** 原文纯文本（复制、编辑回填用） */
+  content: string
+  segments: PostSegmentVO[]
+  /** 正文里的链接数，界面可提示"含 N 个外部链接" */
+  linkCount: number
+  status: number
+  reviewedBy: number | null
+  reviewTime: string | null
+  /** 拒绝理由，仅 status=2 时有值（只有作者看得到） */
+  rejectReason: string | null
+  createTime: string
+  updateTime: string
+  /** 能否编辑：由服务端算（待审核中不能改），前端不要自己推状态机 */
+  canEdit: boolean
+  canDelete: boolean
+}
+
+/** 时间线一页 */
+export interface PostFeedVO {
+  posts: PostVO[]
+  /** 下一页游标；null 表示没有更多 */
+  nextBeforeId: number | null
+  hasMore: boolean
+}
+
+/** 我的帖子概览（页签角标） */
+export interface MyPostsSummaryVO {
+  pending: number
+  approved: number
+  rejected: number
+}
+
+/** 审核队列一页（后台） */
+export interface PostReviewPageVO {
+  records: PostVO[]
+  total: number
+  page: number
+  size: number
+  /** 全站待审核总数，审核员随时知道还剩多少 */
+  pendingTotal: number
+}
+
+/** 发帖 / 编辑 / 审核后的回执 */
+export interface PostActionResultVO {
+  post: PostVO
+  message: string
+}
+
 // ---------------------------------------------------------------- 角色
 
 /** 与后端 sys_user.role 一致：0 学生 / 1 管理员 / 2 教师 / 9 超管 */

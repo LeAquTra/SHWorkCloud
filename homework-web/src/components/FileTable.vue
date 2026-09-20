@@ -104,6 +104,15 @@
                   <el-icon><Download /></el-icon>
                   <span>下载</span>
                 </el-dropdown-item>
+                <!--
+                  复制的是 10 分钟有效的签名地址。回收站里的文件不给复制：
+                  那个地址签的是 OSS 对象，已彻底删除的对象会 404，让用户复制一条
+                  注定打不开的链接不如干脆不给入口。
+                -->
+                <el-dropdown-item v-if="!row.folder && !isRecycle" command="copy-link">
+                  <el-icon><Link /></el-icon>
+                  <span>复制下载链接</span>
+                </el-dropdown-item>
                 <el-dropdown-item command="rename" divided>
                   <el-icon><EditPen /></el-icon>
                   <span>重命名</span>
@@ -143,6 +152,7 @@ import {
   Delete,
   Download,
   EditPen,
+  Link,
   Rank,
   RefreshLeft,
   View,
@@ -163,6 +173,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   open: [row: FileItemVO]
   download: [row: FileItemVO]
+  'copy-link': [row: FileItemVO]
   preview: [row: FileItemVO]
   rename: [row: FileItemVO]
   move: [row: FileItemVO]
@@ -233,6 +244,9 @@ function onCommand(command: string, row: FileItemVO) {
       break
     case 'download':
       emit('download', row)
+      break
+    case 'copy-link':
+      emit('copy-link', row)
       break
     case 'rename':
       emit('rename', row)

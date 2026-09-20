@@ -1,0 +1,34 @@
+# 仅供 FriendApiIntegrationTest 使用的测试配置
+# 连的是本机为集成测试临时起的 MySQL(3307) 与 Redis(6380)，不是生产环境。
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3307/shwork_cloud?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password:
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      database: 0
+
+# 集成测试用的假 OSS 凭据。
+# OssClientConfig 在启动时强制校验 AK/SK 存在（fail fast），缺了直接起不来；
+# 给一组假值即可 —— 签名是纯本地计算，测试里不会真的发请求到 OSS。
+aliyun:
+  oss:
+    endpoint: oss-cn-beijing.aliyuncs.com
+    bucket-name: test-bucket
+    access-key-id: test-ak
+    access-key-secret: test-sk
+  sts:
+    access-key-id: test-sts-ak
+    access-key-secret: test-sts-sk
+    role-arn: acs:ram::0:role/test-role
+
+app:
+  admin:
+    init-password: Test@123456
+  register:
+    enabled: false
+  captcha:
+    enabled: false

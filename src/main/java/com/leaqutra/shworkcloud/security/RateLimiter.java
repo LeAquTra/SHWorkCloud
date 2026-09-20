@@ -33,6 +33,21 @@ public class RateLimiter {
     private static final long INTERNAL_LOGIN_HOUR_LIMIT = 100;
     /** 单用户签发上传凭证上限（/小时） */
     private static final long STS_HOUR_LIMIT = 120;
+    /**
+     * 单用户发起好友申请的上限（/小时）。
+     * <p>防的是"拿好友申请当骚扰工具"：反复申请会持续消耗对方的注意力，
+     * 而每次申请都要写一行库。30 次/小时对正常使用（一节课加几个同学）绰绰有余。
+     */
+    private static final long FRIEND_REQUEST_HOUR_LIMIT = 30;
+    /**
+     * 单用户发消息的上限（/分钟）。
+     * <p>注意这里用"分钟"而不是"小时"：聊天是连续动作，用小时维度会出现
+     * "前 10 分钟把额度用完、后面整节课发不出话"。1000 字符 × 120 条 ≈
+     * 120KB/分钟，对单条连接是很轻的负载，但足以拦住脚本刷屏。
+     */
+    private static final long CHAT_MINUTE_LIMIT = 120;
+    /** 单用户发帖 / 编辑的上限（/小时），见 {@link #checkPostCreate} */
+    private static final long POST_HOUR_LIMIT = 10;
 
     private final StringRedisTemplate redis;
     private final AppProperties appProperties;
@@ -98,6 +113,40 @@ public class RateLimiter {
     public void checkStsIssue(long userId) {
         if (incr(key("sts", "1h", String.valueOf(userId)), Duration.ofHours(1)) > STS_HOUR_LIMIT) {
             throw new BizException(ErrorCode.SEND_LIMIT_EXCEEDED);
+        }
+    }
+
+    /**
+     * 发起好友申请限流（按用户维度）。
+     * <p>只限"发起"，不限"处理"：被申请的人点同意可能一次点十几个
+     * （班里同学挨个加过来），限流会让他卡住没法操作。
+     */
+    public void checkFriendRequest(long userId) {
+        if (incr(key("freq", "1h", String.valueOf(userId)), Duration.ofHours(1))
+                > FRIEND_REQUEST_HOUR_LIMIT) {
+            throw new BizException(ErrorCode.SEND_TOO_FREQUENT, "好友申请过于频繁，请稍后再试");
+        }
+    }
+
+    /** 发消息限流（按用户维度，分钟窗口） */
+    public void checkChatSend(long userId) {
+        if (incr(key("chat", "1m", String.valueOf(userId)), Duration.ofMinutes(1))
+                > CHAT_MINUTE_LIMIT) {
+            throw new BizException(ErrorCode.SEND_TOO_FREQUENT, "发送过于频繁，请稍后再试");
+        }
+    }
+
+    /**
+     * 发帖 / 编辑限流（按用户维度，小时窗口）。
+     * <p>刷帖的真正代价由<b>审核员</b>承担（每一条都要人工看），
+     * 所以这个额度必须比聊天严得多：10 条/小时对"一节课发两三条"完全够用，
+     * 但足以拦住"一口气刷 200 条把队列淹掉"。
+     */
+    public void checkPostCreate(long userId) {
+        if (incr(key("post", "1h", String.valueOf(userId)), Duration.ofHours(1))
+                > POST_HOUR_LIMIT) {
+            throw new BizException(ErrorCode.SEND_TOO_FREQUENT,
+                    "发帖过于频繁（每小时最多 " + POST_HOUR_LIMIT + " 条），请稍后再试");
         }
     }
 

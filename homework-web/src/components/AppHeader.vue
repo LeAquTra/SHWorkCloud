@@ -18,7 +18,18 @@
         class="nav-item"
         :class="{ active: isActive(item.to) }"
       >
-        <el-icon><component :is="item.icon" /></el-icon>
+        <!--
+          好友入口的未读红点：把 el-badge 包在图标外层而不是整个导航项上，
+          这样红点贴着图标，长文案（"我的网盘"）不会把红点推到奇怪的位置。
+        -->
+        <el-badge
+          v-if="item.to === '/friends' && friendStore.hasUnread"
+          :value="friendStore.badge"
+          class="nav-badge"
+        >
+          <el-icon><component :is="item.icon" /></el-icon>
+        </el-badge>
+        <el-icon v-else><component :is="item.icon" /></el-icon>
         <span>{{ item.label }}</span>
       </router-link>
     </nav>
@@ -69,6 +80,14 @@
             <el-icon><Picture /></el-icon>
             <span>我的相册</span>
           </el-dropdown-item>
+          <el-dropdown-item command="friends">
+            <el-icon><ChatDotRound /></el-icon>
+            <span>我的好友</span>
+          </el-dropdown-item>
+          <el-dropdown-item command="home">
+            <el-icon><HomeFilled /></el-icon>
+            <span>我的主页</span>
+          </el-dropdown-item>
           <el-dropdown-item v-if="user.canEnterAdmin" command="admin">
             <el-icon><Setting /></el-icon>
             <span>管理后台</span>
@@ -93,7 +112,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
   ArrowDown,
+  ChatDotRound,
+  ChatLineSquare,
   Folder,
+  HomeFilled,
   Lock,
   Picture,
   Setting,
@@ -103,6 +125,7 @@ import {
 import BrandMark from '@/components/BrandMark.vue'
 import AnnouncementBell from '@/components/AnnouncementBell.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import { useFriendStore } from '@/stores/friend'
 import { useUserStore } from '@/stores/user'
 import { ROLE_LABELS } from '@/types/api'
 import { formatSize } from '@/utils/format'
@@ -110,11 +133,15 @@ import { formatSize } from '@/utils/format'
 const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
+/** 未读红点。轮询在 App.vue 里统一驱动，这里只读数值 */
+const friendStore = useFriendStore()
 
 const navItems = computed(() => {
   const items = [
     { to: '/', label: '我的网盘', icon: Folder },
     { to: '/album', label: '相册', icon: Picture },
+    { to: '/community', label: '社区', icon: ChatLineSquare },
+    { to: '/friends', label: '好友', icon: ChatDotRound },
     { to: '/profile', label: '个人信息', icon: User },
   ]
   if (user.canEnterAdmin) {
@@ -151,6 +178,11 @@ function isActive(to: string): boolean {
   if (to === '/') {
     return route.path === '/' || route.path === '/recycle'
   }
+  // /friends 页里点某人会跳到 /user/:id，那时"好友"仍应保持高亮 ——
+  // 否则用户会觉得"我明明是从好友进来的，怎么导航跑到别的地方了"
+  if (to === '/friends') {
+    return route.path.startsWith('/friends') || route.path.startsWith('/user/')
+  }
   return route.path.startsWith(to)
 }
 
@@ -161,6 +193,13 @@ async function onCommand(command: string) {
       break
     case 'album':
       await router.push('/album')
+      break
+    case 'friends':
+      await router.push('/friends')
+      break
+    case 'home':
+      // 自己的主页 = 个人信息页（他人主页是 /user/:id，见 UserHomeView）
+      await router.push('/profile')
       break
     case 'admin':
       await router.push('/admin')
@@ -286,6 +325,21 @@ onMounted(async () => {
   background: var(--sc-brand-soft);
   color: var(--sc-brand);
   font-weight: 600;
+}
+
+/* 未读红点：只包住图标，因此需要压掉 el-badge 默认的位移与字号 */
+.nav-badge {
+  display: inline-flex;
+  line-height: 1;
+}
+
+.nav-badge :deep(.el-badge__content) {
+  border: none;
+  font-size: 10px;
+  height: 15px;
+  line-height: 15px;
+  padding: 0 4px;
+  transform: translateY(-2px) translateX(4px);
 }
 
 .spacer {

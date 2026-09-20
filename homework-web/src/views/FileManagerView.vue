@@ -133,6 +133,7 @@
           :mode="mode"
           @open="openFolder"
           @download="onDownload"
+          @copy-link="onCopyLink"
           @preview="onPreview"
           @rename="openRename"
           @move="openMove"
@@ -292,6 +293,7 @@ import { useUploadStore } from '@/stores/uploader'
 import { useUserStore } from '@/stores/user'
 import type { BreadcrumbVO, FileItemVO, FolderNodeVO, UploadConfigVO } from '@/types/api'
 import { formatSize, triggerDownload } from '@/utils/format'
+import { copyDownloadLink } from '@/utils/downloadLink'
 
 const props = withDefaults(defineProps<{ initialMode?: 'files' | 'recycle' }>(), {
   initialMode: 'files',
@@ -884,6 +886,17 @@ async function onDownload(row: FileItemVO) {
   } catch (error) {
     ElMessage.error(error instanceof ApiError ? error.message : '获取下载地址失败')
   }
+}
+
+/**
+ * 复制下载链接。
+ *
+ * <p>与「下载」的区别只是拿到地址后不跳转、而是写进剪贴板，所以同样要现取地址
+ * （`download-url` 每次调都是一条新的 10 分钟签名），不能缓存上一次的结果 ——
+ * 缓存会让用户复制到一条更早过期的链接。
+ */
+async function onCopyLink(row: FileItemVO) {
+  await copyDownloadLink(row.id, row.name)
 }
 
 function onPreview(row: FileItemVO) {

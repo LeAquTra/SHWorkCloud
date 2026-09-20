@@ -42,6 +42,42 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '我的相册' },
       },
       {
+        // 好友 + 聊天合成一个页面：两者是同一件事的两半
+        // （左侧好友列表要显示未读，右侧聊天要显示对方名片），拆成两个路由
+        // 反而会出现"从聊天点回好友列表要跳路由、状态要重新拉"的割裂感
+        path: 'friends',
+        name: 'friends',
+        component: () => import('@/views/FriendsView.vue'),
+        meta: { title: '好友' },
+      },
+      {
+        /**
+         * 社区广场。
+         *
+         * 任何已登录用户都能看与发；**发出来的内容默认只有自己和管理员可见**，
+         * 审核通过后才进广场 —— 这一点由后端保证（没有"直接发布"的接口），
+         * 前端不给任何"直接发布"的入口。
+         */
+        path: 'community',
+        name: 'community',
+        component: () => import('@/views/CommunityView.vue'),
+        meta: { title: '社区' },
+      },
+      {
+        /**
+         * 别人的主页（自己看自己请走 /profile，那里有完整资料与可编辑项）。
+         *
+         * 用 `/user/1002` 这种"用户 ID 直接进路径"的形状，而不是
+         * `/user?id=1002`：这个地址是要被分享/被点开的（社区里点作者头像、
+         * 聊天窗点对方名字都跳这里），路径形式更直观，也能直接刷新。
+         */
+        path: 'user/:id',
+        name: 'user-home',
+        component: () => import('@/views/UserHomeView.vue'),
+        props: true,
+        meta: { title: '用户主页' },
+      },
+      {
         path: 'profile',
         name: 'profile',
         component: () => import('@/views/ProfileView.vue'),
@@ -79,6 +115,15 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/AnnouncementManageView.vue'),
         // 公告会影响全站每一个人（紧急公告还会强制弹窗打断操作），只给超管
         meta: { roles: SUPER_ADMIN_ROLES, title: '公告管理' },
+      },
+      {
+        path: 'posts',
+        name: 'admin-posts',
+        component: () => import('@/views/admin/PostReviewView.vue'),
+        // 社区审核：**教师及以上**（STAFF_ROLES）。
+        // 需求原文是"管理员以上审核"，这里把教师也算进来 —— 教师就是机房管理员，
+        // 课堂上需要能处理学生发的内容。后端 @SaCheckRole 的取值集合与此一致。
+        meta: { roles: STAFF_ROLES, title: '社区审核' },
       },
       {
         path: 'ops',

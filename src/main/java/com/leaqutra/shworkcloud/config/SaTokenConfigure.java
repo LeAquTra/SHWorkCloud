@@ -50,12 +50,24 @@ public class SaTokenConfigure implements WebMvcConfigurer {
             "/error"
     };
 
-    /** 教师（机房管理员）可访问的后台接口 */
+    /**
+     * 教师（机房管理员）可访问的后台接口。
+     * <p>
+     * ⚠️ 第 4.2 条规则是 {@code /admin/**} → 只放行 admin / super_admin，
+     * 而<b>教师(role=2) 的派生角色里没有 admin</b>（见 {@code StpInterfaceImpl}）。
+     * 所以任何"教师也要能用"的后台接口，<b>必须在这里列出来</b> ——
+     * 只把方法上的 {@code @SaCheckRole} 写成 OR 是没用的：路由规则先执行、
+     * 先抛 403，注解根本没机会跑。
+     */
     private static final String[] TEACHER_ADMIN_PATHS = {
             "/admin/students/**",
             "/admin/users",                        // 只读列表；写操作由注解再收窄
             "/admin/users/*/reset-password",
-            "/admin/users/reset-password-batch"
+            "/admin/users/reset-password-batch",
+            // 社区审核：教师是机房管理员，课堂上需要能处理学生发的内容。
+            // 与方法上的 @SaCheckRole(value={admin,teacher,super_admin}, mode=OR) 配对；
+            // 少了这一行，教师会在路由规则这一层就吃 403（而不是 Service 层的 40301）。
+            "/admin/posts/**"
     };
 
     private final UserCache userCache;

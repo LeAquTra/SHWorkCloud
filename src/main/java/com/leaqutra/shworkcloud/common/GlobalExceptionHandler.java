@@ -6,6 +6,7 @@ import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -56,6 +57,41 @@ public class GlobalExceptionHandler {
     public ResponseEntity<R<Void>> handleBiz(BizException e) {
         log.warn("业务异常 code={} msg={}", e.getErrorCode().getCode(), e.getMessage());
         return ResponseEntity.ok(R.fail(e.getErrorCode().getCode(), e.getMessage()));
+    }
+
+    // ---------------------------------------------------------------- 数据库
+
+    /**
+     * 数据库访问失败。
+     * <p>
+     * <b>为什么单独处理（真实教训）</b>：这类错误以前会掉进下面的 {@code Exception} 兜底，
+     * 前端只拿到一个笼统的 {@code 50000 服务器内部错误}。这样一来，
+     * "部署时忘了跑增量 SQL、表里缺一列"这种一眼能看出的问题，
+     * 表现却是"所有相关接口都 500 且毫无线索"，只能登服务器翻日志 —— 排查成本极高。
+     * <p>
+     * 这里把<b>根因那一句</b>放进 {@code message} 返回给调用方。泄漏面是可控的：
+     * 只带异常类名与最内层 message（如 {@code Unknown column 'deleted' in 'field list'}），
+     * <b>不带 SQL 全文、不带参数、不带堆栈</b>。
+     * 数据库结构不是攻击者拿不到的秘密（能触发这条的人本来就有接口访问权），
+     * 而"看不出发生了什么"的代价远大于这点信息。
+     */
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<R<Void>> handleDataAccess(DataAccessException e) {
+        String root = rootCauseMessage(e);
+        log.error("数据库访问失败: {}", root, e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(R.fail(ErrorCode.SERVER_ERROR, "数据库访问失败：" + root));
+    }
+
+    /** 取最内层异常的消息，尽量给出一句能直接定位问题的话 */
+    private static String rootCauseMessage(Throwable e) {
+        Throwable current = e;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String type = current.getClass().getSimpleName();
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? type : type + ": " + message;
     }
 
     // ---------------------------------------------------------------- 参数

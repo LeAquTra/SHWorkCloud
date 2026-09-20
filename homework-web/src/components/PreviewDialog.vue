@@ -180,6 +180,10 @@
           图片 / PDF / 视频走 10 分钟有效的签名地址；文本读取由后端处理 GBK 编码。
         </span>
         <el-button @click="emit('update:modelValue', false)">关闭</el-button>
+        <el-button plain @click="copyLink">
+          <el-icon><Link /></el-icon>
+          <span>复制下载链接</span>
+        </el-button>
         <el-button type="primary" @click="download">
           <el-icon><Download /></el-icon>
           <span>下载</span>
@@ -192,11 +196,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, Download, Headset } from '@element-plus/icons-vue'
+import { CopyDocument, Download, Headset, Link } from '@element-plus/icons-vue'
 import FileGlyph from '@/components/FileGlyph.vue'
 import { fileApi } from '@/api'
 import { ApiError } from '@/api/http'
 import type { EmbeddedImageVO, FileItemVO, TextContentVO } from '@/types/api'
+import { copyDownloadLink } from '@/utils/downloadLink'
 import {
   VIEW_TYPE_LABELS,
   copyText,
@@ -338,6 +343,15 @@ async function copyAll() {
   const text = textData.value?.content || ''
   const ok = await copyText(text)
   ElMessage[ok ? 'success' : 'warning'](ok ? '已复制全文' : '复制失败，请手动选择后复制')
+}
+
+/** 复制 10 分钟有效的签名下载地址（预览里顺手复制，不必先关弹窗再下拉菜单） */
+async function copyLink() {
+  const item = props.item
+  if (!item) {
+    return
+  }
+  await copyDownloadLink(item.id, item.name)
 }
 
 watch(

@@ -8,18 +8,29 @@ import type {
   BreadcrumbVO,
   CaptchaImageVO,
   CaptchaVO,
+  ChatMessageVO,
+  ChatThread,
+  ChatUnreadVO,
   CommitVO,
+  ConversationVO,
   EmbeddedImagesVO,
   FileItemVO,
   FolderNodeVO,
+  FriendOverview,
   HumanCheckVO,
   ImageItemVO,
   ImportResultVO,
   LoginVO,
+  MyPostsSummaryVO,
   OrphanVO,
   PageVO,
   PartUrlsVO,
+  PostActionResultVO,
+  PostFeedVO,
+  PostReviewPageVO,
+  PostVO,
   ProfileUpdateVO,
+  PublicProfileVO,
   PutUrlVO,
   QuotaVO,
   ReconcileVO,
@@ -31,6 +42,7 @@ import type {
   UploadTicketVO,
   UploadedPartVO,
   UrlVO,
+  UserCard,
   UserProfileVO,
 } from '@/types/api'
 
@@ -106,6 +118,15 @@ export const userApi = {
   /** 清除头像（同时删除 OSS 对象） */
   clearAvatar: () => del<UserProfileVO>('/user/avatar'),
   quota: () => get<QuotaVO>('/user/quota'),
+
+  /**
+   * 查看**别人**的公开主页（点好友头像、点社区作者头像走它）。
+   *
+   * 返回字段是服务端收窄过的名片：只有昵称/姓名/班级/头像/签名/角色，
+   * 以及"我与 TA 的关系"——**没有**邮箱、生日、性别、容量。
+   * 想拿自己的完整资料请用 {@link userApi.profile}。
+   */
+  publicProfile: (userId: number) => get<PublicProfileVO>(`/user/${userId}/profile`),
 }
 
 // ---------------------------------------------------------------- 文件
@@ -225,6 +246,103 @@ export const announcementApi = {
   active: () => get<AnnouncementActiveVO[]>('/announcements/active'),
 }
 
+// ---------------------------------------------------------------- 好友
+
+export const friendApi = {
+  /** 好友页汇总：好友 + 待处理申请（收/发）+ 名额。进页面一次拿全 */
+  overview: () => get<FriendOverview>('/friends'),
+
+  /** 只要好友列表（聊天左侧栏用） */
+  list: () => get<UserCard[]>('/friends/list'),
+
+  /**
+   * 按**用户 ID** 找人（不是按姓名 / 学号）。
+   *
+   * 服务端只接受 ID：不给"按姓名模糊搜"的入口，避免把"翻一遍全校人"变成一项功能。
+   * ID 是精确值，得先从别处拿到（老师给的名单，或对方主页地址 `/user/1002`
+   * 里的那个数字）。
+   *
+   * 搜到自己时返回自己的名片（`relation: 'SELF'`），界面应显示"这是你自己"；
+   * ID 不存在或该用户已禁用时返回空数组，不报错。
+   */
+  search: (userId: number) => get<UserCard[]>('/friends/search', { userId }),
+
+  /** 发起好友申请；若对方此前已申请过我，则双方直接成为好友 */
+  request: (userId: number) => post<FriendOverview>('/friends/requests', { userId }),
+
+  /** 同意 / 拒绝收到的申请 */
+  handle: (userId: number, accept: boolean) =>
+    post<FriendOverview>('/friends/requests/handle', { userId, accept }),
+
+  /** 删除好友（双向删除，对方的列表里也会消失） */
+  remove: (friendId: number) => del<FriendOverview>(`/friends/${friendId}`),
+}
+
+// ---------------------------------------------------------------- 私聊
+
+export const chatApi = {
+  /** 会话列表：好友 + 最后一条消息 + 未读数 */
+  conversations: () => get<ConversationVO[]>('/chat/conversations'),
+
+  /**
+   * 拉消息（三种用法见 `ChatThread` 的注释）：
+   * - `{ peerId }` 取最新一页
+   * - `{ peerId, afterId }` 增量拉取（轮询用）
+   * - `{ peerId, beforeId, size }` 向上翻历史
+   */
+  messages: (query: { peerId: number; afterId?: number; beforeId?: number; size?: number }) =>
+    get<ChatThread>('/chat/messages', query as Record<string, unknown>),
+
+  /** 发消息。发送者取自登录会话，请求体里没有发送者字段 */
+  send: (toUserId: number, content: string) =>
+    post<ChatMessageVO>('/chat/messages', { toUserId, content }),
+
+  /** 把与某人的会话标记为已读，返回实际置位的条数 */
+  markRead: (peerId: number) =>
+    post<{ updated: number }>(`/chat/read/${peerId}`, {}),
+
+  /** 未读汇总（顶栏红点） */
+  unread: () => get<ChatUnreadVO>('/chat/unread'),
+}
+
+// ---------------------------------------------------------------- 社区
+
+export const communityApi = {
+  /**
+   * 时间线（**只含已通过的帖子**），按时间倒序，游标翻页。
+   *
+   * - 首屏：`{}`
+   * - 下一页：`{ beforeId: 上一页的 nextBeforeId }`
+   * - 某人的帖子：`{ authorId }`
+   * - 我的（含待审与被拒）：`{ mine: true }`
+   */
+  feed: (query: { beforeId?: number; authorId?: number; mine?: boolean; size?: number } = {}) =>
+    get<PostFeedVO>('/community/posts', query as Record<string, unknown>),
+
+  /** 我的帖子概览：待审 / 已通过 / 已拒绝各多少 */
+  mySummary: () => get<MyPostsSummaryVO>('/community/posts/mine/summary'),
+
+  detail: (id: number) => get<PostVO>(`/community/posts/${id}`),
+
+  /**
+   * 发帖。
+   * ⚠️ 请求体里**只有 content**：状态与作者都由服务端决定。
+   * 返回的 `post.status` 恒为 0（待审核），界面上要提示"已提交，等待审核"，
+   * **不要**把这条直接插进时间线（那会让人以为已经发出去了）。
+   */
+  create: (content: string) => post<PostActionResultVO>('/community/posts', { content }),
+
+  /**
+   * 编辑自己的帖子。
+   * ⚠️ 编辑后**一定回到待审核**（含已通过的帖子），所以改完会从时间线暂时消失。
+   */
+  update: (id: number, content: string) =>
+    put<PostActionResultVO>(`/community/posts/${id}`, { content }),
+
+  /** 删除自己的帖子（待审核中的不能删） */
+  remove: (id: number) => del<void>(`/community/posts/${id}`),
+}
+
 // ---------------------------------------------------------------- 后台
 
 export const adminApi = {
@@ -295,6 +413,22 @@ export const adminApi = {
     post<SessionFlushVO>('/admin/ops/sessions/flush', { ipPrefix }),
   reconcileStorage: () => post<ReconcileVO>('/admin/ops/reconcile-storage', {}),
   configSummary: () => get<Record<string, unknown>>('/admin/ops/config-summary'),
+
+  // ------------------------------------------------ 社区审核（管理员及以上）
+
+  /** 审核队列；status 不传表示全部（0 待审 / 1 已通过 / 2 已拒绝） */
+  postQueue: (query: { status?: number; page?: number; size?: number } = {}) =>
+    get<PostReviewPageVO>('/admin/posts', query as Record<string, unknown>),
+
+  /** 待审核数量（后台导航角标） */
+  postPendingCount: () => get<number>('/admin/posts/pending-count'),
+
+  /**
+   * 通过 / 拒绝。
+   * `rejectReason` 建议填但不强制；作者能看到它。
+   */
+  reviewPost: (postId: number, approve: boolean, rejectReason?: string) =>
+    post<PostActionResultVO>('/admin/posts/review', { postId, approve, rejectReason }),
 
   // ------------------------------------------------ 公告（仅超级管理员）
 

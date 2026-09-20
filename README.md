@@ -41,6 +41,8 @@ mysql -uroot -p < src/main/resources/init_sql/init.sql
 # 如果你的库是早期版本建的，按顺序补增量迁移：
 # mysql -uroot -p shwork_cloud < src/main/resources/init_sql/migration_v2.1.sql   # 个性属性
 # mysql -uroot -p shwork_cloud < src/main/resources/init_sql/migration_v2.2.sql   # 公告表 + 头像冷却时间戳
+# mysql -uroot -p shwork_cloud < src/main/resources/init_sql/migration_v2.3.sql   # 好友关系 + 私聊消息
+# mysql -uroot -p shwork_cloud < src/main/resources/init_sql/migration_v2.4.sql   # 社区帖子
 ```
 
 ### 2.2 填写本地配置
@@ -93,7 +95,7 @@ mvn spring-boot:run
 ### 3.1 已验证可用的命令
 
 ```bash
-mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 190 个单元测试
+mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository test      # 280 个测试（含 6 个集成测试，默认跳过）
 mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository compile
 ```
 
@@ -114,6 +116,23 @@ mvn -o -Dmaven.repo.local=%USERPROFILE%\.m2\repository compile
 
 1. 把 `settings.xml` 的 `<localRepository>` 改成 `C:\Users\<你>\.m2\repository`（推荐，一劳永逸）；
 2. 每次构建加 `-Dmaven.repo.local=C:\Users\<你>\.m2\repository`。
+
+> ⚠️ **只用 `-Dmaven.repo.local` 在离线模式下仍可能失败**（实测 Maven 3.9.16 + `-o`）：
+> 报 `Non-resolvable parent POM ... has not been downloaded from it before` ——
+> `~/.m2/repository` 里的 `_remote.repositories` 标记与当前仓库 id 对不上，
+> 离线模式会拒绝使用它。此时用**显式 settings 文件**最稳（不必改用户级配置）：
+>
+> ```powershell
+> # 在项目根建一个只给本仓库用的 settings.xml
+> @'
+> <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+>   <localRepository>C:\Users\<你>\.m2\repository</localRepository>
+>   <offline>true</offline>
+> </settings>
+> '@ | Set-Content -Encoding UTF8 settings-local.xml
+>
+> mvn -o -s settings-local.xml test      # 已实测：266 个测试全绿
+> ```
 
 **问题二：离线无法打可执行 fat jar**
 
@@ -179,6 +198,31 @@ pwsh ./scripts/api-smoke.ps1 -Login admin -Password 'YourInitPassword'
 中文文件名编码、无效 token 被拒、回收站删除/还原/彻底删除）。
 接口清单与 curl 示例见 [docs/后端接口手册.md](docs/后端接口手册.md)。
 
+### 3.6 集成测试（**真的跑 SQL 的那一层**，强烈建议加进 CI）
+
+```powershell
+# 需要本机有 MySQL(3307) 与 Redis(6380)，库表先由 init.sql 建好
+mysql --host=127.0.0.1 --port=3307 -uroot -p < src\main\resources\init_sql\init.sql
+$env:RUN_INTEGRATION_TESTS='true'; mvn -o -s settings-local.xml test
+```
+
+不设这个环境变量时，集成测试会被跳过（`Skipped: 6`），只跑 274 个纯逻辑/静态守卫测试 ——
+**这就是本项目此前最大的测试缺口**：266 个测试一条 SQL 都没跑过，于是
+"加好友接口 500"这类问题只能靠猜，最后把一个"结果集列数 ≠ record 组件数"
+的错误直接发到了线上。
+
+| 测试 | 覆盖 |
+|------|------|
+| `FriendApiIntegrationTest` | 真实 MySQL + Redis 下打 HTTP 接口：好友页汇总 / 按 ID 查找（含搜到自己）/ 发起申请 / **拒绝后再申请** |
+| `ShWorkCloudApplicationTests` | 完整 Spring 上下文能否装配 |
+| `MapperResultSetContractTest` | 静态守"每个 `@Select` 的列数 == 目标 record 的组件数"——**没有数据库也能拦住上面那个错** |
+
+连接串在 `src/test/resources/application-test.yaml`（指向 127.0.0.1:3307 / 6380），
+需要指别的库时用 `--spring.datasource.url=...` 覆盖。
+
+> ⚠️ 实测在受管沙箱里跑集成测试需要放行：`mysqld`/`redis-server` 的子进程启动、
+> 以及 `~/.m2` 之外的仓库写入（见 §3.2 的 settings 方案）。
+
 ## 4. 项目结构
 
 ```
@@ -193,20 +237,20 @@ SHWorkCloud/
 │   ├── common/                              R / ErrorCode / BizException / 全局异常处理
 │   ├── config/                              OSS・STS・app 配置、Sa-Token、MyBatis-Plus
 │   ├── security/                            登录上下文、角色缓存、限流、密码、CIDR
-│   ├── entity/ mapper/                      7 张表
+│   ├── entity/ mapper/                      10 张表
 │   ├── dto/ vo/                             请求与响应模型
 │   ├── service/                             业务服务 + job/ 定时任务
 │   └── controller/                          REST 接口（admin/ 为后台）
-├── src/test/java/                           单元测试（190 个用例）
+├── src/test/java/                           280 个测试（274 纯逻辑/静态守卫 + 6 集成，见 §3.6）
 └── homework-web/                            前端（Vue 3 + Vite + TS + Element Plus）
     ├── src/api/                             axios 封装 + 拦截器（Token 走 sessionStorage）
     ├── src/utils/uploader.ts                预签名直传：单次 PUT / 分片 / 断点续传 / 速率
     ├── src/utils/md5.ts                     纯 TS MD5（有 RFC 向量验证）
     ├── src/workers/md5.worker.ts            分块计算指纹，不卡界面
-    ├── src/stores/                          user（会话隔离）/ uploader（上传队列）/ announcement（公告）
+    ├── src/stores/                          user（会话隔离）/ uploader（上传队列）/ announcement（公告）/ friend（未读红点）
     ├── src/composables/useIdleLogout.ts     空闲自动登出
     ├── public/favicon.svg                   站点图标（标签页 + 页头同一个标识）
-    └── src/views/                           登录、改密、网盘、后台（用户/导入/题库/公告/运维）
+    └── src/views/                           登录、改密、网盘、社区、好友与聊天、用户主页、后台（用户/导入/题库/公告/运维/社区审核）
 ```
 
 ---
@@ -233,6 +277,15 @@ SHWorkCloud/
 | 文件 | `GET /api/files/{id}/download-url`、`/preview-url` | 10 分钟签名 URL |
 | 回收站 | `GET /api/recycle`、`POST /recycle/restore`、`DELETE /recycle/purge`、`/recycle/empty` | — |
 | 用户 | `GET /api/user/profile`、`PUT /user/profile`、`GET /user/quota` | 资料/个性属性/容量 |
+| 用户 | `GET /api/user/{userId}/profile` | **他人公开主页**（好友/聊天/社区点头像都走它）。字段已收窄：只有昵称/姓名/班级/头像/签名/角色 + 与我的关系，**不含邮箱/生日/性别/容量** |
+| 好友 | `GET /api/friends`、`/friends/list`、`/friends/search?userId=` | 汇总（好友+申请+名额）/ 好友列表 / **按用户 ID 精确查找**（不支持姓名模糊搜） |
+| 好友 | `POST /api/friends/requests`、`POST /friends/requests/handle`、`DELETE /friends/{friendId}` | 申请 / 同意·拒绝 / 删除。**上限 50**，发申请与同意两处都校验 |
+| 私聊 | `GET /api/chat/conversations`、`GET /chat/messages?peerId=&afterId=&beforeId=&size=` | 会话列表（含未读）/ 拉消息。`afterId` 增量、`beforeId` 翻历史，返回 `maxId` 作下一个游标 |
+| 私聊 | `POST /api/chat/messages`、`POST /chat/read/{peerId}`、`GET /chat/unread` | 发送（仅文字，≤1000 字）/ 标记已读 / 未读汇总（顶栏红点）。**非好友不能发** |
+| 社区 | `GET /api/community/posts` | 广场（**只含已通过**）。游标翻页：回传 `nextBeforeId`；`?authorId=` 看某人的、`?mine=true` 看自己的（含待审与被拒） |
+| 社区 | `POST /api/community/posts`、`PUT /community/posts/{id}`、`DELETE /community/posts/{id}` | 发帖（**一律待审核**）/ 编辑（**回到待审核**）/ 删除。请求体只有 `content` |
+| 社区 | `GET /api/community/posts/{id}`、`/community/posts/mine/summary` | 详情（未通过的仅作者与审核者可见）/ 我的三个状态计数 |
+| 后台 | `GET /api/admin/posts`、`/admin/posts/pending-count`、`POST /admin/posts/review` | **社区审核：教师及以上**（role 1/2/9）。见 §7 关于 `mode = SaMode.OR` 的故障记录 |
 | 头像 | `POST /api/user/avatar`、`DELETE /api/user/avatar`、`GET /api/user/avatar/{userId}` | 仅 JPG/PNG、≤5MB、存 OSS；换头像自动删旧对象；**每 24 小时限一次**（冷却中返回 40123，`avatarChangeableAt` 给出下次可改时间） |
 | 在线阅读 | `GET /api/files/{id}/preview-url`、`GET /api/files/{id}/preview`、`GET /api/files/{id}/text`（含 `html` 原格式）、`GET /api/files/{id}/embedded-images` | 图片/视频/音频流式预览（支持 Range）；**PDF 按需求不提供在线预览**；docx 渲染成结构化 HTML、xlsx 渲染成 HTML 表格；docx/pptx 内嵌图片以 data URL 返回 |
 | 图片管理 | `GET /api/images` | 跨目录相册列表，每项已带签名预览地址 |
@@ -287,8 +340,29 @@ SHWorkCloud/
 | **修正 `app.import` 配置键** | `application.yaml` 里写的是 `app.import.*` | 改为 `app.student-import.*`（与 `AppProperties.StudentImport` 字段名一致） | 🔴 真实缺陷：键名写错**不会报错**，Spring 只是静默忽略 —— 表现是"设了 `IMPORT_DEFAULT_PASSWORD` 却没生效，导入的学生拿不到初始密码" |
 | **删除即清 OSS** | 仅彻底删除才删 OSS | `app.recycle.enabled=false` 时删除即彻底删除；删用户/头像/题目也删 OSS | 需求：保证 OSS 容器整洁 |
 | **OSS 对账** | 无 | 每日扫 `homework/`、`avatar/`、`captcha/` 清理无引用对象（24h 宽限） | 远程删除可能失败，需要兜底 |
+| **好友关系模型** | 非目标（§1.4 把"评论 / 消息通知"列为超出范围） | 有向边 + 双向两行：一行 = 「`user_id` 的列表里有 `friend_id`」，互为好友 = 两条边都 `status=1` | 单行存一对用户的话，查"我的好友"要写 `user_id=? OR friend_id=?`，**OR 用不上索引**；且必须额外存"申请是谁发的"，否则容易写出"一边显示好友、另一边显示待审核"的撕裂状态 |
+| **好友上限 50** | 未说明 | `FriendRules.MAX_FRIENDS` **硬编码常量**；名额 = 已确认好友 + 待处理申请；**接受申请时先 `SELECT ... FOR UPDATE` 锁自己的用户行再重数** | 只算好友数的话，"49 个好友 + 十个申请同时被接受"会一起通过检查把上限撑破；不锁行就是典型的 check-then-act 竞态 |
+| **拒绝申请** | 未说明 | **删掉**那条待处理行，不置"已拒绝"状态 | 留一个 REJECTED 标记会形成永久黑名单语义（对方再也申请不了）；删除则"拒绝后仍可再次申请" |
+| **🔴 好友边一律物理删除** | 未说明 | `friend_relation` **没有 `deleted` 列**，`FriendRelation` 也没有 `@TableLogic`；拒绝申请 / 删除好友 / 删号一律 `DELETE` | **真实故障（用户报的）**："加好友时提示发送申请失败"（HTTP 500）。根因是**软删除与唯一键天生冲突**：`uk_edge(user_id, friend_id)` 是唯一键，MySQL 不支持条件唯一键，所以 `UPDATE deleted = 1` 之后那一行**仍然占着键** → A 被拒绝后再申请 B 撞 `Duplicate entry` → 500。<br>同类问题本项目早有先例：`file_entry` 用**生成列 `active_name`** 把回收站的行排除出唯一键（那里要保留回收站语义）。好友边不需要留痕，直接删更干净。<br>回归守卫：`FriendRelationSchemaTest`（静态检查 DDL/实体/Mapper 三处都不再出现该列与逻辑删除）+ `FriendRulesTest.deletionIsPhysical` |
+| **🔴 MyBatis 结果集列数必须等于 record 组件数** | 未说明 | `FriendRelationMapper` 的查询行类型按用途拆成两个 record：`FriendUserRow`（9 组件）/ `FriendRequestRow`（10 组件）；每个 `@Select` 的列数与它声明的 record 严格一致 | 🔴 **真实故障（用户报的）**："添加好友失败 / 按 ID 搜好友失败"，两个接口都 500。响应体是 `Constructor auto-mapping of 'FriendUserRow(...11 args...)' failed. The constructor takes '11' arguments, but there are only '10' columns in the result set.` —— MyBatis 把结果映射到 record 时**按位置对齐**，而那个 record 当时有 11 个组件（多两个只在申请场景用得上的字段），好友/搜索查询只给了 9 列。**列数与组件数不一致在编译期完全看不出来，只有真跑一次 SQL 才会炸。**<br>修法不是"给每处查询补 `NULL` 列"（那只是把位置对齐的脆弱性藏得更深），而是按用途拆 record，让形状在编译期就对得上。<br>回归守卫：`MapperResultSetContractTest`（静态：列数 == 组件数）+ `FriendApiIntegrationTest`（真跑 MySQL） |
+| **🔴 集成测试缺位是上面这个故障的根本原因** | 只有纯逻辑单测 | 新增 `FriendApiIntegrationTest` 与 `src/test/resources/application-test.yaml`；`ShWorkCloudApplicationTests` 也补上 `@ActiveProfiles("test")`，让 `RUN_INTEGRATION_TESTS=true mvn test` **开箱即用** | 这个项目此前 266 个测试全是"纯逻辑 + 静态文本检查"，**一条 SQL 都没真跑过**，所以"加好友 500"只能靠猜（我先后猜过"软删除撞唯一键"和"库结构缺列"，**两次都被证伪**）。补上真实 MySQL/Redis 的端到端测试后，同一类问题在提交前就会暴露。详见 §3.6 |
+| **数据库异常要能自报根因** | 未说明 | `GlobalExceptionHandler` 新增 `DataAccessException` 处理器，把最内层异常消息放进响应 `message` | 以前数据库错误掉进 `Exception` 兜底，前端只拿到笼统的 `50000 服务器内部错误`，必须登服务器翻日志才能定位。现在响应体直接是 `数据库访问失败：... Unknown column 'x'`。只带异常类名 + 最内层 message，不含 SQL 全文/参数/堆栈 |
+| **好友查找只按用户 ID** | 未说明 | `GET /friends/search?userId=1002`，精确主键点查 | 原实现按学号/登录名精确 + 姓名/昵称前缀搜。改成只收 ID 是**主动收紧**：模糊搜等于把"翻一遍全校人"变成一项功能，而 ID 必须先拿到（名单、或对方主页地址 `/user/1002` 里的数字）。收益是没有枚举面，代价是多一步"问对方要 ID" |
+| **聊天实时性** | 非目标 | **游标式轮询**（`afterId` / `maxId`），聊天窗打开时 4 秒一次、顶栏红点 30 秒一次 | WebSocket 依赖不在本地仓库里（`spring-boot-starter-websocket` 缺失），且会话是**内存 DAO**、token 走 `Authorization` 头，WS 握手要另设通道。接口契约与传输层解耦，将来换 SSE/WS 只改前端传输部分 |
+| **聊天隐私** | 未说明 | 审计日志**只记长度不记正文**，后台没有任何查看聊天内容的接口 | 私聊属隐私；日志留副本等于把它存到了更容易被翻到的地方 |
+| **社区审核模型** | §1.4 把"评论"列为超出范围 | 新表 `post`，状态机与 `announcement` 同构：待审核 → 已通过 / 已拒绝 | 两处审核语义一致。**发帖一律落为待审核**：不是靠前端少给按钮，而是接口层面就没有"直接发布"这条路（`PostReq` 里只有 `content`，契约测试守着） |
+| **已通过的帖子被编辑后回到待审核** | 未说明 | 编辑 = 状态重置为 0，并清空上一次的审核结论 | 🔴 否则作者可以先用正常内容过审、再把正文换成任何东西。代价是编辑后帖子会从广场暂时消失，界面明确提示；待审核中的帖子不允许再改/删（改了会让审核员读到与他即将批准的不同内容） |
+| **"链接特殊显示"由服务端切段** | 未说明 | `LinkSegmenter` 把正文切成 `text` / `link` 分段下发，前端只把 `link` 段渲染成 `<a>` | 若让前端用正则切：① "什么算链接"有了两份实现；② 渲染层越厚注入面越大。服务端切段还能把"链接数"（审核信号）与渲染判定统一到同一份逻辑 |
+| **只认 http / https / www.** | 未说明 | `javascript:` / `data:` / `vbscript:` / `file:` 一律不识别，原样当文字留在正文里（不丢字，也不给 href） | 这些不是"链接"而是注入载荷。回归守卫：`LinkSegmenterTest` |
+| **"管理员以上"含教师** | 未说明 | 审核权限 = role ∈ {1 管理员, 2 教师, 9 超管}，`@SaCheckRole(value = {"admin","teacher","super_admin"}, mode = SaMode.OR)`；并把 `/admin/posts/**` 加进 `SaTokenConfigure.TEACHER_ADMIN_PATHS` | ⚠️ 角色编号不是有序等级（0 学生/1 管理员/2 教师/9 超管），教师(2) 数值比管理员(1) 大却权限更小。**两个坑都要躲**：① 只写 `admin` 会让教师审不了学生的帖子；② 漏写 `mode = SaMode.OR` 会让注解退回 AND 语义（见下一行） |
+| **🔴 `@SaCheckRole` 默认是 AND 语义** | 未说明 | 多角色注解一律写 `mode = SaMode.OR`；`/admin/posts/**` 同时加入教师白名单 | **真实故障（用户报的）**：社区审核"只有超级管理员能进，管理员进直接 403"。原因是 Sa-Token 的角色是**派生值**（`StpInterfaceImpl`）：只有超管同时拥有 `super_admin + admin + teacher`，管理员(1) 只有 `admin + teacher`、教师(2) 只有 `teacher`。不写 OR 时超管三项全中→通过，管理员差一个 `super_admin`→403。<br>**两个条件缺一不可**：注解里的 OR（管**方法级**）**和** 白名单里的路径（管**路由级**）—— 路由规则先执行，教师不在白名单就会先抛 403，注解根本没机会跑。本项目其它 Controller 的多角色注解全都写了 OR，社区审核当初是唯一漏掉的。<br>回归守卫：`AdminPostAuthorizationTest`（把注解交给 Sa-Token **真实的** `SaCheckRoleHandler` 判，不依赖 Spring）+ `CommunityContractTest.everyAdminEndpointAllowsTeacherToo` |
+| **🔴 源码里的非 ASCII 字面量被编译坏** | 未说明 | `pom.xml` 声明 `project.build.sourceEncoding`，并在 `maven-compiler-plugin` 的 `<configuration>` 里**再写一次** `<encoding>UTF-8</encoding>`；`LinkSegmenter` 的标点用 `\uXXXX` 转义写死 | 🔴 **真实故障**：本机 JVM 默认编码是 **GBK**，maven-compiler-plugin 沿用平台编码读 `.java`。源文件是 UTF-8，于是 `"、。，；：！？…"` 编译进 class 后变成乱码，链接末尾标点剥离全部失效。既有中文（"下载"、"作业.docx"）都在 GBK 码位范围内，所以这颗雷一直没爆。**实测该插件 3.14.1 不读 `project.build.sourceEncoding` 属性**，必须在插件 `configuration` 里也写一次。回归守卫：`LinkSegmenterTest` |
 | **排除 `sa-token-jackson`** | 未提及 | pom 里 `exclude` 掉 Sa-Token 带来的 `sa-token-jackson`，并自建 `SaTokenJsonConfig` 注入基于 **Jackson 3** 的 `SaJsonTemplate` | 🔴 **真实故障**：Sa-Token 1.45 会扫描所有 jar 的 `META-INF/satoken/` 并立即 install 插件，`sa-token-jackson` 的 `install()` 引用 **Jackson 2** 的 `PolymorphicTypeValidator`，而 Boot 4 只有 **Jackson 3**（`tools.jackson`）→ `NoClassDefFoundError` → **应用启动即崩、systemd 无限重启**。Sa-Token 对插件异常 fail-fast，不跳过坏插件，只能排除依赖。回归守卫：`SaTokenStackTest` |
 | **OSS 客户端强制 HTTPS** | 未说明 | `OssClientConfig` 显式 `ClientBuilderConfiguration.setProtocol(Protocol.HTTPS)`，并规范化 endpoint 的协议前缀/结尾斜杠 | 🔴 **真实故障**：`aliyun-sdk-oss` 的 `ClientConfiguration` 默认 `Protocol.HTTP`，`generatePresignedUrl` 因此签出 `http://` 直传地址；前端在 https 页面下被浏览器按**混合内容（Mixed Content）**直接拦掉 XHR，前端只报"网络错误，上传中断"、OSS 侧只看到失败请求 —— 两头都像网络问题。同时服务端自身调 OSS 也走明文。回归守卫：`OssClientHttpsTest` |
+
+> ⚠️ **v2.3 / v2.4 的表依赖唯一索引与自增主键单调**：`friend_relation.uk_edge`（防重复申请）、
+> `chat_message.id` / `post.id`（游标翻页）。MySQL 8 上无需额外配置。
+> 已有库升级请按 §2.1 的顺序补 `migration_v2.3.sql` 与 `migration_v2.4.sql`。
 
 ---
 
@@ -329,6 +403,27 @@ curl -X POST "http://localhost:8081/api/admin/ops/oss-reconcile?dryRun=false" -H
   一次上传 120 个以上文件的文件夹会被 `40114 发送次数超限` 拦住，需要分批上传或调大该常量；
   人机验证的免验证窗口（10 分钟）与这个限制是两回事，别混淆；
 - 搜索为**前缀匹配**（`LIKE 'x%'`）；全模糊匹配需要 FULLTEXT(ngram) 或 ES；
+- **好友查找只支持按「用户 ID」精确查**（`GET /friends/search?userId=1002`），
+  不支持按姓名 / 学号模糊搜。这是有意的取舍：模糊搜等于把"翻一遍全校人"变成一项功能，
+  而 ID 是精确值 —— 得先从名单或对方主页地址（`/user/1002`）拿到。
+  代价是多一步"问对方要 ID"，收益是没有枚举面；
+- **好友与私聊没有长连接**：所以"对方正在输入""消息已送达"这类实时状态没有实现，
+  已读也只到"整条会话"粒度（不做单条回执）。聊天记录**按 id 游标分页**而非页码；
+- **聊天内容教师与管理员看不到**，后台没有查看入口，审计日志只记长度。
+  这是有意的隐私边界；若将来需要合规审计，得单独设计并明确告知用户；
+- **好友关系的并发上限有一个理论敞口**：A 的两个不同好友同时点"同意"时，
+  各自锁的是**自己**的用户行，因此 A 可能达到 51 人。彻底关掉需要按 id 升序
+  同时锁双方的用户行（防死锁）。当前规模下不值得引入这个复杂度，
+  已在 `FriendService.acceptInternal` 的注释里写明；
+- **社区不做评论、点赞、转发、图片**：本期只有文字动态 + 链接识别。
+  要加图片就要接 OSS 配额与内容审核，那是另一个量级的工作；
+- **社区没有举报入口**：违规内容靠审核入口拦截，已发布内容出问题需要管理员
+  或作者自行处理。举报/申诉流不在本期范围；
+- **审核没有统计页**：只落了 `reviewed_by` / `review_time`（数据库可查），
+  后台没有"谁审核了多少条"的页面；
+- **已通过的帖子被编辑会暂时从广场消失**（回到待审核）。这是刻意取舍，见 §7；
+  若业务上不能接受"编辑导致下线"，需要引入"草稿版本 + 已发布版本"双版本模型，
+  工作量会显著上升；
 - 教师收作业闭环（班级/作业/提交/批改）属**第二阶段**，文档 §13 已给出模型与预留字段；
 - 集成测试需真实 MySQL/Redis/OSS：
   `RUN_INTEGRATION_TESTS=true mvn test -Dtest=ShWorkCloudApplicationTests`
