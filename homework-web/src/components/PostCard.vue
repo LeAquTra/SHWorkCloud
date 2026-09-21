@@ -77,6 +77,7 @@ import { useRouter } from 'vue-router'
 import { Link } from '@element-plus/icons-vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import {
+  POST_STATUS_APPROVED,
   POST_STATUS_LABELS,
   POST_STATUS_PENDING,
   POST_STATUS_REJECTED,

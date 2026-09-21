@@ -27,6 +27,21 @@
           >
             <el-icon><component :is="item.icon" /></el-icon>
             <span>{{ item.label }}</span>
+            <!--
+              社区审核的待审红点（有人发帖就会亮）。
+              学生发帖后帖子只进入待审队列，审核员不一定在审核页上 ——
+              这个角标是"有人等你处理"的唯一提示，所以它必须自己会更新（见 store 的轮询）。
+              ⚠️ 这里刻意用原生 `title` 而不是 el-tooltip：整个 nav-item 是一个
+              router-link（<a>），再叠一层靠鼠标事件触发的弹出层只会给导航加风险，
+              而这条提示本来也只需要"悬停能看见数字的含义"。
+            -->
+            <span
+              v-if="item.to === '/admin/posts' && postReview.hasPending"
+              class="nav-badge"
+              :title="`${postReview.pending} 条帖子等待审核`"
+            >
+              <el-badge :key="postReview.bumpKey" :value="postReview.pending" :max="99" />
+            </span>
           </router-link>
         </nav>
 
@@ -44,15 +59,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, type Component } from 'vue'
+import { computed, onBeforeUnmount, onMounted, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import { Bell, ChatLineSquare, InfoFilled, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AnnouncementCenter from '@/components/AnnouncementCenter.vue'
+import { startPendingPolling, stopPendingPolling, usePostReviewStore } from '@/stores/postReview'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const user = useUserStore()
+
+/**
+ * 社区待审数（侧栏「社区审核」的红点）。
+ *
+ * <p>学生发帖后帖子只会进入待审队列，审核员不在这个页面上就是不知道 ——
+ * 所以这个数字是"有人等你处理"的唯一提示，必须自己会更新。
+ *
+ * <p>数字与轮询都放在 {@link usePostReviewStore} 里，**不再在这个组件里自己 setInterval**：
+ * 审核页也在显示同一个数字，两处各拉一次就会出现"侧栏 3 条、点进去 0 条"的
+ * 自相矛盾；共用一份之后，审核页审完一条能让红点立刻跟着动。
+ *
+ * <p>轮询失败静默保留上一次的值（见 store）：网络抖一下不该让红点闪掉。
+ */
+const postReview = usePostReviewStore()
 
 interface NavItem {
   to: string
@@ -99,7 +129,14 @@ onMounted(async () => {
       /* 401 已由拦截器处理 */
     }
   }
+  // 角色已确定之后再起轮询：非后台角色打这个接口会被 403 挡掉，没必要发。
+  // startPendingPolling 会立刻先拉一次，所以红点在进后台的瞬间就是准的。
+  if (user.canEnterAdmin) {
+    startPendingPolling(postReview)
+  }
 })
+
+onBeforeUnmount(stopPendingPolling)
 </script>
 
 <style scoped>
@@ -160,6 +197,54 @@ onMounted(async () => {
   background: var(--sc-brand-soft);
   color: var(--sc-brand);
   font-weight: 600;
+}
+
+/*
+ * 待审角标：贴在文字右侧，不参与导航项的居中布局。
+ * 外面那层 span 只负责占位与 tooltip（title），角标本身还是 el-badge。
+ */
+.nav-badge {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+/*
+ * 有新帖进来时闪一下（key 由 store 的 bumpKey 驱动，节点重建 → 动画重播）。
+ * 只做一次缩放，不做无限循环：教室里的老师不需要一个一直在跳的红点，
+ * 那反而会让人习惯性忽略它。
+ */
+.nav-badge :deep(.el-badge__content) {
+  border: none;
+  font-size: 10px;
+  height: 16px;
+  line-height: 16px;
+  padding: 0 5px;
+  transform: translateY(-1px) translateX(0);
+  animation: sc-badge-bump 900ms ease-out 1;
+}
+
+@keyframes sc-badge-bump {
+  0% {
+    scale: 0.6;
+    opacity: 0.4;
+  }
+  45% {
+    scale: 1.25;
+    opacity: 1;
+  }
+  100% {
+    scale: 1;
+    opacity: 1;
+  }
+}
+
+/* 尊重系统「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  .nav-badge :deep(.el-badge__content) {
+    animation: none;
+  }
 }
 
 .nav-foot {

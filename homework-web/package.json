@@ -6,10 +6,13 @@
   "description": "作业云盘前端（Vue 3 + Vite + TypeScript + Element Plus）",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run check && vite build",
     "preview": "vite preview --port 4173",
     "type-check": "tsc --noEmit",
-    "check:templates": "node scripts/check-templates.mjs"
+    "check:templates": "node scripts/check-templates.mjs",
+    "check:handlers": "node scripts/check-handlers.mjs",
+    "check:sfc": "node scripts/verify-sfc.mjs",
+    "check": "npm run type-check && npm run check:templates && npm run check:handlers && npm run check:sfc"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",
