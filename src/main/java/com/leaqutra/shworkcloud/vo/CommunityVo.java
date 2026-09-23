@@ -61,8 +61,58 @@ public final class CommunityVo {
     public record MySummary(long pending, long approved, long rejected) {
     }
 
-    /** 审核队列一页（后台） */
-    public record ReviewPage(List<Post> records, long total, long page, long size, long pendingTotal) {
+    /**
+     * 审核队列一页（后台「社区审核」用）。
+     * <p>
+     * ⚠️ <b>已经在用的响应契约，字段不要动</b>：前端 `PostReviewPageVO`
+     * 按 `records / total / page / size / pendingTotal` 解构。
+     * 管理台要的统计另开了 {@link AdminPostPage}（多一个 statusCounts），
+     * 而不是往这里加字段 —— 加字段虽然向后兼容，但会让两个页面的契约
+     * 混成一个，读代码的人分不清哪个字段是给谁用的。
+     *
+     * @param pendingTotal 全站待审核总数（不受筛选条件影响，导航红点用）
+     */
+    public record ReviewPage(List<Post> records, long total, long page, long size,
+                             long pendingTotal) {
+    }
+
+    /**
+     * 社区管理台的帖子列表一页：在 {@link ReviewPage} 的基础上多带全局状态分布。
+     *
+     * @param statusCounts 三个状态各多少条。<b>是不受当前筛选影响的全局值</b> ——
+     *                     管理员需要知道"现在一共有多少条已通过的内容"，
+     *                     而不是"我筛出来的这些"（后者看 {@code total}）
+     */
+    public record AdminPostPage(List<Post> records, long total, long page, long size,
+                                long pendingTotal, StatusCounts statusCounts) {
+    }
+
+    /**
+     * 社区内容的全局状态分布。
+     *
+     * @param pending  待审核
+     * @param approved 已通过（广场上正在展示的）
+     * @param rejected 已拒绝
+     */
+    public record StatusCounts(long pending, long approved, long rejected) {
+
+        public long total() {
+            return pending + approved + rejected;
+        }
+    }
+
+    /**
+     * 批量操作结果。
+     * <p>
+     * <b>刻意返回 {@code affected} 而不是只回一个 200</b>：批量操作最容易出的事
+     * 是"看起来成功了，其实一条都没匹配上"（ID 粘错、状态已经变了）。
+     * 把数字带回去，前端才能明确说"已处理 3 条，2 条状态不允许"。
+     *
+     * @param affected 真正被改动的条数
+     * @param skipped  因为状态/存在性不满足而跳过的条数
+     * @param message  一句可直接展示给管理员的结论
+     */
+    public record BatchResult(int affected, int skipped, String message) {
     }
 
     /**

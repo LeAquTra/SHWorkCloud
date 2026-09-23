@@ -126,6 +126,21 @@ const routes: RouteRecordRaw[] = [
         meta: { roles: STAFF_ROLES, title: '社区审核' },
       },
       {
+        /**
+         * 社区管理：**管理员及以上**（ADMIN_ROLES），教师不在其中。
+         *
+         * <p>与「社区审核」分开是刻意的：审核是"处理待审队列"（教师日常就要做），
+         * 管理则能做破坏性操作 —— 下架正在广场展示的内容、彻底删除别人的帖子。
+         * 后端 `POST /admin/posts/batch` 用的是
+         * `@SaCheckRole({"admin","super_admin"})` + `PostService.requireManager()`，
+         * 前端的角色门槛必须与它一致：放宽了会让教师看到一个点了就 403 的页面。
+         */
+        path: 'community',
+        name: 'admin-community',
+        component: () => import('@/views/admin/PostManageView.vue'),
+        meta: { roles: ADMIN_ROLES, title: '社区管理' },
+      },
+      {
         path: 'ops',
         name: 'admin-ops',
         component: () => import('@/views/admin/OpsView.vue'),

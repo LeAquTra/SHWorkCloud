@@ -351,6 +351,8 @@ SHWorkCloud/
 | **审核页要跟着队列自己动** | 未说明 | `PostReviewView` 订阅 store 的待审数：**变大**（有新帖）→ 自动刷新列表 + `el-badge` 页签角标 + 顶部提示"有 N 条新帖提交，已自动刷新"；**变小**（同事在别处审完了）→ 也刷新，避免列表里还挂着已被处理的帖子（点"通过"会报状态错误）。另外自动修正**页码越界**：审完最后一页最后一条时自动退一页，而不是显示"没有待审核的帖子"这种误导性的空列表 | 审核员的任务是"把队列清空"，让列表始终等于队列比让他反复手点刷新更符合实际用法 |
 | **前端报错必须带出真实原因** | 未说明 | `PostReviewView` 的加载失败会显示 `[业务码] 后端 message`，并在页面顶部常驻一条 `el-alert` | 🔴 实际踩过：社区审核报"加载失败"四个字没有下文，只能登服务器翻日志。前端把 `ApiError.code/message` 丢掉之后，一个"部署的是旧后端"（40004/40300）和"数据库出错"（50000）在界面上长得一模一样 |
 | **🔴 不要用"方法名"当事件处理器（会把事件对象喂进去）** | 未说明 | 需要页码的调用一律写成 `@click="reload()"`；`reload(toPage?: number)` 内部也只接受 `typeof toPage === 'number'` | 🔴 **真实故障（用户报的）**：后台「社区审核」**点右上角「刷新」就报"加载失败"**，而首次进页面完全正常。根因是模板写了 `@click="reload"` —— Vue 对 `@click="fn"` 的语义是"把事件对象当第一个实参"，于是 `page` 被赋成一个 `PointerEvent`，请求串变成 `page=[object%20PointerEvent]`，服务端 `Long page` 绑不上 → 40000「参数类型错误: page」。**`if (toPage)` 这种真假判断拦不住它**（事件对象是真值），而 esbuild/rollup 与 `tsc --noEmit` 都不会报（`.vue` 模板不在 tsc 检查范围内）。<br>回归守卫：`npm run check:handlers`（`homework-web/scripts/check-handlers.mjs`，已串进 `npm run build`）：只看**原生 DOM 事件名**上的**裸方法名**处理器，并解析组件 `defineEmits` 的载荷类型 —— `@select="switchFolder"`（FolderTree emit 的是 `number`）不会误报，而 `<el-button @click="reload">`（el-button 声明的是 `click: evt => evt instanceof MouseEvent`，即原生事件透传）会被抓住 |
+| **社区管理（管理员及以上）** | 未说明 | 新增后台页 `/admin/community` + `GET /admin/posts/summary` + `POST /admin/posts/batch` + `DELETE /admin/posts/{id}`。**按 ID 定位**（`postId` 精确查 / `ids` 批量取 / `keyword` 搜正文 / `authorId` 看某人发过什么），批量 **下架**（退回待审，广场立刻不可见但内容还在）、**拒绝**、**彻底删除**（物理删除，不可恢复） | 「社区审核」只能处理待审队列；收到举报时管理员手上往往**只有一个帖子 ID 或一句原文**，没有按 ID 定位的入口就只能一页页翻。权限与审核刻意分开：**教师只能审（40301），管理是 role 1/9（40302）** —— 下架正在展示的内容、删除别人的帖子都是破坏性操作。批量返回 `affected`/`skipped` 而不是只回 200：批量最典型的失败是"看起来成功了其实一条都没匹配上"。逐条留痕（含作者/长度/状态变化，**不记正文**） |
+| **🔴 带动态标签的 SQL 用 XML 而不是 `@Select("<script>…")`** | 未说明 | 新增 `src/main/resources/mapper/PostMapper.xml`（`application.yaml` 早已配好 `mapper-locations: classpath*:mapper/**/*.xml`），把后台列表 / 总数 / 批量删除三条动态语句放进去；列表与总数的筛选条件收敛到一个 `<sql id="reviewFilters">` 片段，两条语句都 `<include>` 它 | 🔴 注解写法的隐蔽陷阱：MyBatis 只在语句**以** `<script>` 开头时才把它当 XML 解析（`XMLLanguageDriver.createSqlSource`）。一旦有人把 `<script>` 挪到第二行、或在前面加个注释，`<if>` 就会被当 SQL 原文发给数据库 → 语法错误，**且只有真跑一次请求才会发现**。XML 没有这个陷阱。<br>代价是 XML 里的错误既不在编译期、也不在原注解守卫的覆盖范围内，所以新增 `MapperXmlContractTest` 静态守住五条：① 无裸 `<`/`&`（否则**启动即崩**）；② 语句 `id` 与接口方法一一对应（否则运行期 `Invalid bound statement`）、且不与注解重复映射（否则启动报 already contains）；③ `<sql>` 片段必须被 include（防死代码/漏引用）；④ **列表与 COUNT 的 `<if>` 条件逐条一致**（防"翻到第 2 页是空的/总数虚高"）；⑤ `resultType` 的 record 组件数 == SELECT 列数 |
 | **好友查找只按用户 ID** | 未说明 | `GET /friends/search?userId=1002`，精确主键点查 | 原实现按学号/登录名精确 + 姓名/昵称前缀搜。改成只收 ID 是**主动收紧**：模糊搜等于把"翻一遍全校人"变成一项功能，而 ID 必须先拿到（名单、或对方主页地址 `/user/1002` 里的数字）。收益是没有枚举面，代价是多一步"问对方要 ID" |
 | **聊天实时性** | 非目标 | **游标式轮询**（`afterId` / `maxId`），聊天窗打开时 4 秒一次、顶栏红点 30 秒一次 | WebSocket 依赖不在本地仓库里（`spring-boot-starter-websocket` 缺失），且会话是**内存 DAO**、token 走 `Authorization` 头，WS 握手要另设通道。接口契约与传输层解耦，将来换 SSE/WS 只改前端传输部分 |
 | **聊天隐私** | 未说明 | 审计日志**只记长度不记正文**，后台没有任何查看聊天内容的接口 | 私聊属隐私；日志留副本等于把它存到了更容易被翻到的地方 |
@@ -367,6 +369,13 @@ SHWorkCloud/
 > ⚠️ **v2.3 / v2.4 的表依赖唯一索引与自增主键单调**：`friend_relation.uk_edge`（防重复申请）、
 > `chat_message.id` / `post.id`（游标翻页）。MySQL 8 上无需额外配置。
 > 已有库升级请按 §2.1 的顺序补 `migration_v2.3.sql` 与 `migration_v2.4.sql`。
+>
+> ⚠️ **`migration_v2.3.sql` / `migration_v2.4.sql` 的建表体必须与 `init.sql` 逐字一致**：
+> 两份脚本分别服务"存量库升级"与"全新部署"，一旦结构漂移（比如 migration 少了一个索引），
+> 故障只会在**存量库**上复现，最难查。回归守卫：`FriendRelationSchemaTest.migrationMatchesInitSql`
+> 逐字比对三张表（`friend_relation` / `chat_message` / `post`）。
+> 这两份脚本此前只被文档与测试引用、**文件本身并不存在**（`FriendRelationSchemaTest` 因此报
+> "建表脚本不存在"），现已补齐。
 
 ---
 

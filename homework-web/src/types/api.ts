@@ -644,7 +644,13 @@ export interface MyPostsSummaryVO {
   rejected: number
 }
 
-/** 审核队列一页（后台） */
+/**
+ * 后台帖子列表一页（`GET /admin/posts`，审核页与管理台共用同一个接口）。
+ *
+ * ⚠️ 这个类型**比后端的 `ReviewPage` 多一个 `statusCounts`** —— 接口实际返回的是
+ * `CommunityVo.AdminPostPage`（= `ReviewPage` + 统计）。审核页只读 `pendingTotal`，
+ * 管理台才用 `statusCounts`；两者共用一个类型是因为它们打的是同一个接口。
+ */
 export interface PostReviewPageVO {
   records: PostVO[]
   total: number
@@ -652,6 +658,19 @@ export interface PostReviewPageVO {
   size: number
   /** 全站待审核总数，审核员随时知道还剩多少 */
   pendingTotal: number
+  /**
+   * 三个状态各多少条（社区管理台的统计卡片）。
+   * ⚠️ 这是**全局值，不受当前筛选条件影响** —— 管理员要知道"站上有多少条已通过的内容"，
+   * 而不是"我这次筛出来多少条"（后者看 `total`）。
+   */
+  statusCounts: PostStatusCountsVO
+}
+
+/** 社区内容的全局状态分布，见 `PostReviewPageVO.statusCounts` */
+export interface PostStatusCountsVO {
+  pending: number
+  approved: number
+  rejected: number
 }
 
 /** 发帖 / 编辑 / 审核后的回执 */
@@ -659,6 +678,25 @@ export interface PostActionResultVO {
   post: PostVO
   message: string
 }
+
+/**
+ * 批量操作的结果。
+ *
+ * ⚠️ `affected` 与 `skipped` 必须展示给管理员：批量操作最容易出的事是
+ * "看起来成功了，其实一条都没匹配上"（ID 粘错、状态已经变了）。
+ */
+export interface PostBatchResultVO {
+  /** 真正被改动的条数 */
+  affected: number
+  /** 因状态/存在性不满足而跳过的条数 */
+  skipped: number
+  /** 后端给的一句可直接展示的结论 */
+  message: string
+}
+
+/** 社区管理台支持的批量动作（`action` 字段的取值） */
+export const POST_BATCH_ACTIONS = ['unpublish', 'reject', 'delete'] as const
+export type PostBatchAction = (typeof POST_BATCH_ACTIONS)[number]
 
 // ---------------------------------------------------------------- 角色
 

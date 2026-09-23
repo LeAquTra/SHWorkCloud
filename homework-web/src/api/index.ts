@@ -26,8 +26,11 @@ import type {
   PageVO,
   PartUrlsVO,
   PostActionResultVO,
+  PostBatchAction,
+  PostBatchResultVO,
   PostFeedVO,
   PostReviewPageVO,
+  PostStatusCountsVO,
   PostVO,
   ProfileUpdateVO,
   PublicProfileVO,
@@ -414,14 +417,53 @@ export const adminApi = {
   reconcileStorage: () => post<ReconcileVO>('/admin/ops/reconcile-storage', {}),
   configSummary: () => get<Record<string, unknown>>('/admin/ops/config-summary'),
 
-  // ------------------------------------------------ 社区审核（管理员及以上）
+  // ------------------------------ 社区审核（教师及以上）/ 社区管理（管理员及以上）
 
-  /** 审核队列；status 不传表示全部（0 待审 / 1 已通过 / 2 已拒绝） */
-  postQueue: (query: { status?: number; page?: number; size?: number } = {}) =>
+  /**
+   * 后台帖子列表。所有筛选都可选：
+   * - `status`：0 待审 / 1 已通过 / 2 已拒绝；**不传表示全部**
+   * - `postId`：精确查一条（举报/工单里拿到的 ID）
+   * - `ids`：按 ID 批量取（核对一份举报清单）
+   * - `authorId`：某个学生发过的全部内容
+   * - `keyword`：正文关键字
+   *
+   * ⚠️ `status` 必须是 number 或 undefined。传 `NaN`（例如 `Number('all')` 的结果）
+   * 会序列化成 `status=NaN`，服务端 Integer 绑不上 → 40000「参数类型错误: status」。
+   */
+  postQueue: (query: {
+    status?: number
+    postId?: number
+    ids?: number[]
+    authorId?: number
+    keyword?: string
+    page?: number
+    size?: number
+  } = {}) =>
     get<PostReviewPageVO>('/admin/posts', query as Record<string, unknown>),
 
   /** 待审核数量（后台导航角标） */
   postPendingCount: () => get<number>('/admin/posts/pending-count'),
+
+  /**
+   * 社区内容的全局状态分布（管理台统计卡片）。
+   * 与列表分开：这三个数字不受筛选影响，翻页/改条件时没必要重算。
+   */
+  postStatusCounts: () => get<PostStatusCountsVO>('/admin/posts/summary'),
+
+  /**
+   * 批量操作（仅管理员及以上，教师调用会拿到 40302）。
+   *
+   * - `unpublish`：下架回待审核（广场立刻不可见，内容还在，可重新审）
+   * - `reject`：待审核的内容判不通过（可带 `reason`，作者可见）
+   * - `delete`：**物理删除，不可恢复**
+   *
+   * 一次最多 200 条（后端 `PostRules.MAX_BATCH_IDS`），超出会报 40000。
+   */
+  postBatch: (ids: number[], action: PostBatchAction, reason?: string) =>
+    post<PostBatchResultVO>('/admin/posts/batch', { ids, action, reason }),
+
+  /** 彻底删除单条（管理台行内）。不看作者、不限状态，仅管理员及以上 */
+  postDelete: (postId: number) => del<PostBatchResultVO>(`/admin/posts/${postId}`),
 
   /**
    * 通过 / 拒绝。

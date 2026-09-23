@@ -61,7 +61,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, type Component } from 'vue'
 import { useRoute } from 'vue-router'
-import { Bell, ChatLineSquare, InfoFilled, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
+import { Bell, ChatLineSquare, InfoFilled, Management, Picture, Tools, UploadFilled, User } from '@element-plus/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AnnouncementCenter from '@/components/AnnouncementCenter.vue'
 import { startPendingPolling, stopPendingPolling, usePostReviewStore } from '@/stores/postReview'
@@ -105,6 +105,10 @@ const navItems = computed<NavItem[]>(() => {
   // 课堂上需要能处理学生发的内容。与路由 meta.roles / 后端 @SaCheckRole 一致。
   items.push({ to: '/admin/posts', label: '社区审核', icon: ChatLineSquare })
   if (user.isAdmin) {
+    // 社区管理只给管理员及以上：下架正在广场展示的内容、彻底删除别人的帖子
+    // 都是破坏性操作，不给教师。与路由 meta.roles = ADMIN_ROLES、
+    // 后端 @SaCheckRole({"admin","super_admin"}) 三处口径一致。
+    items.push({ to: '/admin/community', label: '社区管理', icon: Management })
     items.push({ to: '/admin/captchas', label: '验证码题库', icon: Picture })
   }
   if (user.isSuperAdmin) {

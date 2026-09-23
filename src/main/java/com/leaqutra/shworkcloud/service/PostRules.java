@@ -3,6 +3,8 @@ package com.leaqutra.shworkcloud.service;
 import com.leaqutra.shworkcloud.common.BizException;
 import com.leaqutra.shworkcloud.common.ErrorCode;
 
+import java.util.List;
+
 /**
  * 社区发帖与审核的规则常量与纯校验。
  * <p>
@@ -38,7 +40,62 @@ public final class PostRules {
      */
     public static final int POST_HOUR_LIMIT = 10;
 
+    /**
+     * 一次批量操作最多处理多少条（社区管理台）。
+     * <p>上界来自两处实际约束：① 后台一页最多 {@link #REVIEW_MAX_PAGE} 条，
+     * "全选本页"不该被拒；② 这个 ID 列表会展开成 SQL 的 {@code IN (...)}，
+     * 200 条以内语句长度可控。
+     * <p>超过上界时<b>报错</b>而不是截断 —— 会改数据的操作不能让管理员
+     * 以为 200 条都处理了，而实际只处理了前 100 条。
+     */
+    public static final int MAX_BATCH_IDS = 200;
+
+    // ------------------------------------------------ 社区管理的批量动作
+    //
+    // 动作名是**接口契约**（前端直接传字符串），所以集中在这里定义：
+    // 拼错一个字母就是 40000，而不是"静默什么都没做"。
+
+    /** 下架：退回待审核，广场上立刻不可见，但内容还在 */
+    public static final String ACTION_UNPUBLISH = "unpublish";
+
+    /** 批量拒绝：待审核的内容判不通过（可带理由，作者可见） */
+    public static final String ACTION_REJECT = "reject";
+
+    /** 彻底删除：物理删除，不可恢复 */
+    public static final String ACTION_DELETE = "delete";
+
+    /** 允许的批量动作集合 */
+    public static final List<String> BATCH_ACTIONS =
+            List.of(ACTION_UNPUBLISH, ACTION_REJECT, ACTION_DELETE);
+
+    /**
+     * 正文关键字的搜索串长度上限。
+     * <p>它是用户输入，而比正文还长的关键字<b>在逻辑上不可能匹配到任何帖子</b>
+     * （正文本身就限 {@link #MAX_CHARS} 字），所以截断不会漏结果，只是白扫一遍。
+     */
+    public static final int MAX_KEYWORD_CHARS = 50;
+
     private PostRules() {
+    }
+
+    /**
+     * 规范化正文关键字。
+     * <p><b>刻意不转义 {@code %} / {@code _}</b>：它们只会让搜索更宽（多匹配几条），
+     * 不构成注入 —— 关键字是作为预编译参数传进 LIKE 的。转义反而会让
+     * "想搜带下划线的内容"变得搜不到，而搜索本来就是给自己人用的。
+     *
+     * @return 去空白后的关键字；空串或 {@code null} 返回 {@code null}（表示不筛）
+     */
+    public static String normalizeKeyword(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.strip();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        return trimmed.length() > MAX_KEYWORD_CHARS
+                ? trimmed.substring(0, MAX_KEYWORD_CHARS) : trimmed;
     }
 
     /**

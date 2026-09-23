@@ -5,10 +5,12 @@ import cn.dev33.satoken.annotation.SaMode;
 import com.leaqutra.shworkcloud.common.R;
 import com.leaqutra.shworkcloud.dto.CommunityDto;
 import com.leaqutra.shworkcloud.security.ClientIpUtil;
+import com.leaqutra.shworkcloud.service.PostRules;
 import com.leaqutra.shworkcloud.service.PostService;
 import com.leaqutra.shworkcloud.vo.CommunityVo;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,22 +18,42 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
- * 绀惧尯瀹℃牳锛堝悗鍙帮級銆? * <p>
- * <b>鏉冮檺鍙ｅ緞鏄€岀鐞嗗憳鍙婁互涓娿€嶏紝鑰屼笖鏄笁涓鑹茬殑鏄惧紡鏋氫妇锛?/b>
- * {@code admin} / {@code teacher} / {@code super_admin}銆? * <p>鈿狅笍 <b>缁濅笉鑳藉啓鎴?{@code @SaCheckRole("admin")} 涔嬪鐨勬暟鍊兼瘮杈?/b>锛? * 鏈」鐩殑瑙掕壊缂栧彿涓嶆槸鏈夊簭绛夌骇锛? 瀛︾敓 / 1 绠＄悊鍛?/ 2 鏁欏笀 / 9 瓒呯锛夛紝
- * 鏁欏笀(2) 鐨勬暟鍊兼瘮绠＄悊鍛?1) 澶э紝浣?Sa-Token 鐨勮鑹插瓧绗︿覆鏄淳鐢熷€? * 锛堣 {@code StpInterfaceImpl}锛? 鈫?super_admin+admin+teacher锛? * 1 鈫?admin+teacher锛? 鈫?teacher锛夆€斺€?鎵€浠ユ妸鏁欏笀涔熺畻杩?绠＄悊鍛樹互涓?锛? * 蹇呴』鏄惧紡鍒楀嚭 {@code teacher}锛屼笉鑳介潬 {@code admin} 涓€涓爣绛俱€? * <p>闇€姹傚師鏂囨槸"绠＄悊鍛樹互涓婂鏍搁€氳繃"锛岃繖閲屾妸<b>鏁欏笀</b>涔熺撼鍏ワ細
- * 鏁欏笀灏辨槸鏈烘埧绠＄悊鍛橈紝璇惧爞涓婇渶瑕佽兘澶勭悊瀛︾敓鍙戠殑鍐呭銆? * <p>涓ゅ眰闃茬嚎锛歿@code SaTokenConfigure} 鐨勬暀甯堢櫧鍚嶅崟閲屽凡鍔犲叆 {@code /admin/posts/**}锛? * 璺敱瑙勫垯涓嶅啀鎶婃暀甯堟尅鍦ㄥ闈紱鐒跺悗杩欓噷鐨勬敞瑙ｅ啀閫愪釜鏂规硶鏀剁揣銆? * Service 灞傜殑 {@code PostService.requireReviewer()} 杩樹細鐙珛鏍￠獙涓€娆?鈥斺€? * 娉ㄨВ鍙 Controller 鐢熸晥锛屽皢鏉ヨ嫢鏈変汉浠庡埆澶勮皟 Service锛岄偅閬撻槻绾夸粛鐒跺湪銆? * <p>
- * 馃敶 <b>{@code mode = SaMode.OR} 涓嶈兘鐪侊紙鐪熷疄鏁呴殰锛?/b>锛歋a-Token 鐨? * {@code @SaCheckRole} 榛樿鏄?<b>AND</b> 璇箟 鈥斺€?瑕佹眰鍚屾椂鍏峰鍒楀嚭鐨?b>鍏ㄩ儴</b>瑙掕壊銆? * 鑰屾湰椤圭洰鐨勮鑹叉槸娲剧敓鐨勶紙瑙?{@code StpInterfaceImpl}锛夛紝鍙湁瓒呯鍚屾椂鎷ユ湁
- * {@code super_admin + admin + teacher}锛涚鐞嗗憳(1) 鍙湁 {@code admin + teacher}锛? * 鏁欏笀(2) 鍙湁 {@code teacher}銆備簬鏄笉鍐?OR 鏃讹細
+ * 社区：审核（教师及以上）与内容管理（管理员及以上）。
+ * <p>
+ * <b>两类权限刻意分开</b>：
+ * <ul>
+ *   <li><b>审核</b> —— {@code admin} / {@code teacher} / {@code super_admin}：
+ *       教师就是机房管理员，课堂上需要能处理学生发的内容，所以把教师纳入；</li>
+ *   <li><b>管理</b> —— 只给 {@code admin} / {@code super_admin}：
+ *       下架正在展示的内容、彻底删除别人的帖子都是破坏性操作，不给教师。</li>
+ * </ul>
+ * Service 层的 {@code PostService.requireReviewer()} / {@code requireManager()}
+ * 会独立再校验一次 —— 注解只对 Controller 生效，将来若有人从别处调 Service，
+ * 那道防线仍然在。
+ * <p>
+ * ⚠️ <b>绝不写成 {@code @SaCheckRole("admin")} 之外的数值比较</b>：
+ * 本项目的角色编号不是有序等级（0 学生 / 1 管理员 / 2 教师 / 9 超管），
+ * 教师(2) 的数值比管理员(1) 大但权限更小。Sa-Token 的角色字符串是派生值
+ * （见 {@code StpInterfaceImpl}）：9 → super_admin+admin+teacher，
+ * 1 → admin+teacher，2 → teacher —— 所以"管理员及以上"必须显式列出角色名。
+ * <p>
+ * 🔴 <b>{@code mode = SaMode.OR} 不能省（真实故障）</b>：Sa-Token 的
+ * {@code @SaCheckRole} 默认是 <b>AND</b> 语义 —— 要求同时具备列出的<b>全部</b>角色。
+ * 而本项目的角色是派生的，只有超管同时拥有 super_admin + admin + teacher；
+ * 管理员(1) 只有 admin + teacher，教师(2) 只有 teacher。于是不写 OR 时：
  * <pre>
- *   瓒呯   鈫?admin 鉁?teacher 鉁?super_admin 鉁?鈫?閫氳繃
- *   绠＄悊鍛?鈫?admin 鉁?teacher 鉁?super_admin 鉁?鈫?<b>403</b>锛堢敤鎴锋姤鐨勫氨鏄繖涓級
- *   鏁欏笀   鈫?admin 鉁?                         鈫?403
+ *   超管   → admin ✔ teacher ✔ super_admin ✔ → 通过
+ *   管理员 → admin ✔ teacher ✔ super_admin ✘ → <b>403</b>（用户报的就是这个）
+ *   教师   → admin ✘                          → 403
  * </pre>
- * 琛ㄧ幇灏辨槸"绀惧尯瀹℃牳鍙湁瓒呯骇绠＄悊鍛樿兘杩?銆傛湰椤圭洰鍏跺畠 Controller 鐨勫瑙掕壊娉ㄨВ
- * <b>鍏ㄩ兘鍐欎簡 OR</b>锛圓dminUserController / AdminCaptchaController /
- * AdminImportController锛夛紝鏈枃浠跺綋鍒濇槸鍞竴婕忔帀鐨勩€? * 鍥炲綊瀹堝崼锛歿@code AdminPostAuthorizationTest}銆亄@code CommunityContractTest}銆? */
+ * 表现就是"社区审核只有超级管理员能进"。本项目其它 Controller 的多角色注解
+ * <b>全都写了 OR</b>（AdminUserController / AdminCaptchaController /
+ * AdminImportController），本文件当初是唯一漏掉的。
+ * 回归守卫：{@code AdminPostAuthorizationTest}、{@code CommunityContractTest}。
+ */
 @RestController
 @RequestMapping("/admin/posts")
 @RequiredArgsConstructor
@@ -41,18 +63,30 @@ public class AdminPostController {
     private final ClientIpUtil clientIpUtil;
 
     /**
-     * 瀹℃牳闃熷垪銆?     * <pre>
-     *   GET /api/admin/posts?status=0          # 鍙湅寰呭鏍革紙榛樿锛屾寜鎻愪氦鏃堕棿鍊掑簭锛?     *   GET /api/admin/posts?status=1&amp;page=1   # 宸查€氳繃
-     *   GET /api/admin/posts?status=2          # 宸叉嫆缁?     *   GET /api/admin/posts                   # 鍏ㄩ儴
+     * 后台帖子列表（审核队列 / 社区管理台共用）。所有筛选条件都可选：
+     * <pre>
+     *   GET /api/admin/posts?status=0                  # 只看待审核（按 id 倒序）
+     *   GET /api/admin/posts?status=1&amp;page=1           # 已通过
+     *   GET /api/admin/posts?status=2                  # 已拒绝
+     *   GET /api/admin/posts                           # 全部
+     *   GET /api/admin/posts?postId=12                 # 精确查一条（举报/工单里的 ID）
+     *   GET /api/admin/posts?ids=12,15,18              # 按 ID 批量取（核对举报清单）
+     *   GET /api/admin/posts?authorId=1002             # 某个学生发过的全部内容
+     *   GET /api/admin/posts?keyword=广告              # 正文关键字
      * </pre>
-     * 杩斿洖閲屽甫 {@code pendingTotal}锛屽墠绔彲浠ヤ竴鐩存樉绀?杩樻湁 N 鏉″緟瀹?銆?     */
+     * 返回里带 {@code pendingTotal}（全局待审数，侧栏红点用）与 {@code statusCounts}
+     * （三个状态的全局分布，管理台统计卡片用）—— 两者都<b>不受筛选条件影响</b>。
+     * <p>响应形状见 {@code CommunityVo.AdminPostPage}：它是
+     * {@code ReviewPage}（审核页在用的契约，字段不要动）加一个统计字段。
+     * 审核页只读 {@code pendingTotal}，忽略多余字段即可。
+     */
     @SaCheckRole(value = {"admin", "teacher", "super_admin"}, mode = SaMode.OR)
     @GetMapping
-    public R<CommunityVo.ReviewPage> queue(CommunityDto.ReviewQuery query) {
+    public R<CommunityVo.AdminPostPage> queue(CommunityDto.ReviewQuery query) {
         return R.ok(postService.reviewPage(query));
     }
 
-    /** 寰呭鏍告暟閲忥紙鍚庡彴瀵艰埅瑙掓爣锛岃疆璇㈢敤锛屽搷搴斾綋鏈€灏忥級 */
+    /** 待审核数量（后台导航角标，轮询用，响应体最小） */
     @SaCheckRole(value = {"admin", "teacher", "super_admin"}, mode = SaMode.OR)
     @GetMapping("/pending-count")
     public R<Long> pendingCount() {
@@ -60,11 +94,25 @@ public class AdminPostController {
     }
 
     /**
-     * 閫氳繃 / 鎷掔粷銆?     * <pre>
+     * 社区内容的状态分布（管理台顶部的统计卡片）。
+     * <p>与列表接口分开是刻意的：三个数字<b>不受筛选条件影响</b>，
+     * 管理员翻页、改筛选时它们不该跟着变，也就没必要每次重算。
+     */
+    @SaCheckRole(value = {"admin", "super_admin"}, mode = SaMode.OR)
+    @GetMapping("/summary")
+    public R<CommunityVo.StatusCounts> summary() {
+        return R.ok(postService.statusCounts());
+    }
+
+    /**
+     * 通过 / 拒绝。
+     * <pre>
      *   POST /api/admin/posts/review   {"postId": 12, "approve": true}
-     *   POST /api/admin/posts/review   {"postId": 12, "approve": false, "rejectReason": "鍚笉鑹俊鎭?}
+     *   POST /api/admin/posts/review   {"postId": 12, "approve": false, "rejectReason": "含不良信息"}
      * </pre>
-     * 鎷掔粷鐞嗙敱浣滆€呭彲瑙侊紙寤鸿濉絾涓嶅己鍒讹紝鐞嗙敱瑙?{@code PostRules.normalizeRejectReason}锛夈€?     * 鍙兘澶勭悊寰呭鏍哥殑甯栧瓙锛氶噸澶嶅鐞嗕細杩斿洖 40097锛岃€屼笉鏄潤榛樿鐩栧墠涓€涓汉鐨勭粨璁恒€?     */
+     * 拒绝理由作者可见（建议填但不强制，理由见 {@code PostRules.normalizeRejectReason}）。
+     * 只能处理待审核的帖子：重复处理会返回 40097，而不是静默覆盖前一个人的结论。
+     */
     @SaCheckRole(value = {"admin", "teacher", "super_admin"}, mode = SaMode.OR)
     @PostMapping("/review")
     public R<CommunityVo.ActionResult> review(@RequestBody CommunityDto.ReviewReq req,
@@ -73,11 +121,49 @@ public class AdminPostController {
     }
 
     /**
-     * 鍗曟潯璇︽儏锛堝鏍告椂鐐瑰紑鐪嬪畬鏁村唴瀹癸級銆?     * <p>涓庣敤鎴风 {@code GET /community/posts/{id}} 鐨勫尯鍒槸<b>涓嶅彈鍙鎬ч檺鍒?/b>锛?     * 寰呭鍐呭瀹℃牳鍛樺繀椤昏兘鐪嬪埌锛屽惁鍒欐病娉曞銆?     */
+     * 批量操作（社区管理台：<b>管理员或超管</b>，教师不在此列）。
+     * <pre>
+     *   POST /api/admin/posts/batch  {"ids":[12,13],"action":"unpublish"}
+     *   POST /api/admin/posts/batch  {"ids":[12,13],"action":"reject","reason":"含广告"}
+     *   POST /api/admin/posts/batch  {"ids":[12,13],"action":"delete"}
+     * </pre>
+     * 返回 {@code affected} / {@code skipped}，而不是只回一个 200：批量操作最容易出的
+     * 事是"看起来成功了，其实一条都没匹配上"（ID 粘错、状态已经变了），
+     * 必须把真实处理条数带回去让界面说清楚。
+     * <p>⚠️ {@code delete} 是<b>物理删除且不可恢复</b>，前端必须二次确认。
+     * <p>一次最多 {@code PostRules.MAX_BATCH_IDS} 条，超出直接报错而不是静默截断。
+     */
+    @SaCheckRole(value = {"admin", "super_admin"}, mode = SaMode.OR)
+    @PostMapping("/batch")
+    public R<CommunityVo.BatchResult> batch(@RequestBody CommunityDto.BatchReq req,
+                                            HttpServletRequest request) {
+        return R.ok(postService.batch(req, clientIpUtil.get(request)));
+    }
+
+    /**
+     * 彻底删除单条内容（管理台行内操作）。
+     * <p>与用户端 {@code DELETE /community/posts/{id}} 的区别有两点：
+     * ① 不看作者是谁（管理员可以删任何人的）；② <b>不限制状态</b> ——
+     * 用户端不让删待审核的帖子（怕审核员点开时报不存在），
+     * 而管理员删它恰恰就是为了把它从队列里拿掉。
+     */
+    @SaCheckRole(value = {"admin", "super_admin"}, mode = SaMode.OR)
+    @DeleteMapping("/{id}")
+    public R<CommunityVo.BatchResult> delete(@PathVariable Long id,
+                                             HttpServletRequest request) {
+        CommunityDto.BatchReq req = new CommunityDto.BatchReq(
+                List.of(id), PostRules.ACTION_DELETE, null);
+        return R.ok(postService.batch(req, clientIpUtil.get(request)));
+    }
+
+    /**
+     * 单条详情（审核/管理时点开看完整内容）。
+     * <p>与用户端 {@code GET /community/posts/{id}} 的区别是<b>不受可见性限制</b>：
+     * 待审内容审核员必须能看到，否则没法审。
+     */
     @SaCheckRole(value = {"admin", "teacher", "super_admin"}, mode = SaMode.OR)
     @GetMapping("/{id}")
     public R<CommunityVo.Post> detail(@PathVariable Long id) {
         return R.ok(postService.detail(id));
     }
 }
-

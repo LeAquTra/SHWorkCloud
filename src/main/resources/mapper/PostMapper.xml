@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  社区（post）的后台列表 / 批量删除。
+
+  为什么这三条语句放在 XML 而不是写成 @Select("<script>…")：
+  它们都带 <if> / <foreach> 这类动态标签，而注解写法有个隐蔽陷阱 ——
+  MyBatis 只在语句**以** <script> 开头时才把它当 XML 解析
+  （见 XMLLanguageDriver.createSqlSource）；一旦有人把 <script> 挪到第二行、
+  或在前面加个注释，<if> 就会被当成 SQL 原文发给数据库 → 语法错误，
+  而且只有真跑一次请求才会发现（编译期完全看不出来）。XML 没有这个陷阱。
+
+  ⚠️ 两条纪律：
+  1) selectForReview 与 countForReview 的 WHERE 条件**必须逐条一致**：
+     一个是列表、一个是总数，条件不一致会出现"翻到第 2 页是空的"
+     或"总数永远比实际多"。改一个务必同步改另一个。
+  2) XML 里不能出现裸的 < 与 &（都要写成 &lt; / &amp;），
+     否则整个映射文件解析失败、应用启动即崩。
+     回归守卫：MapperResultSetContractTest（列数 == record 组件数 + XML 合法性）。
+-->
+<mapper namespace="com.leaqutra.shworkcloud.mapper.PostMapper">
+
+    <!-- 后台列表的公共列清单：与 PostRow record 的 16 个组件一一对应（按位置映射） -->
+    <sql id="reviewColumns">
+        p.id            AS post_id,
+        p.author_id     AS author_id,
+        p.content       AS content,
+        p.link_count    AS link_count,
+        p.status        AS status,
+        p.reviewed_by   AS reviewed_by,
+        p.review_time   AS review_time,
+        p.reject_reason AS reject_reason,
+        p.create_time   AS create_time,
+        p.update_time   AS update_time,
+        u.username      AS author_username,
+        u.nickname      AS author_nickname,
+        u.real_name     AS author_real_name,
+        u.class_name    AS author_class_name,
+        u.avatar_key    AS author_avatar_key,
+        u.role          AS author_role
+    </sql>
+
+    <!-- 与 selectForReview 严格一致的筛选条件：改这里务必两份一起改 -->
+    <sql id="reviewFilters">
+        <if test="status != null">AND p.status = #{status}</if>
+        <if test="postId != null">AND p.id = #{postId}</if>
+        <if test="authorId != null">AND p.author_id = #{authorId}</if>
+        <if test="ids != null and ids.size() > 0">
+            AND p.id IN
+            <foreach collection="ids" item="pid" open="(" separator="," close=")">#{pid}</foreach>
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND p.content LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+    </sql>
+
+    <!--
+      后台帖子列表（审核队列 + 社区管理台共用）。
+      JOIN sys_user 取作者名而不是逐条再查（N+1）；u.deleted = 0 必须显式带上 ——
+      @TableLogic 只对 post 自己的行生效，不会穿透到联表进来的用户表。
+    -->
+    <select id="selectForReview"
+            resultType="com.leaqutra.shworkcloud.mapper.PostMapper$PostRow">
+        SELECT
+        <include refid="reviewColumns"/>
+        FROM post p
+        JOIN sys_user u ON u.id = p.author_id
+        WHERE u.deleted = 0
+        <include refid="reviewFilters"/>
+        ORDER BY p.id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- 当前筛选条件下的总数（分页用）。条件的唯一来源是上面的 reviewFilters -->
+    <select id="countForReview" resultType="long">
+        SELECT COUNT(*)
+        FROM post p
+        JOIN sys_user u ON u.id = p.author_id
+        WHERE u.deleted = 0
+        <include refid="reviewFilters"/>
+    </select>
+
+    <!--
+      按 ID 批量删除（"彻底删除"，不可恢复）。
+      调用方先按 ID 取出实体用于审计留痕，这里只负责删。
+    -->
+    <delete id="deleteByIds">
+        DELETE FROM post
+        WHERE id IN
+        <foreach collection="ids" item="pid" open="(" separator="," close=")">#{pid}</foreach>
+    </delete>
+
+</mapper>

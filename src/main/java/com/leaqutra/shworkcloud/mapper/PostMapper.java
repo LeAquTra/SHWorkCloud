@@ -2,6 +2,7 @@ package com.leaqutra.shworkcloud.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.leaqutra.shworkcloud.entity.Post;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -91,55 +92,61 @@ public interface PostMapper extends BaseMapper<Post> {
                              @Param("limit") int limit);
 
     /**
-     * 审核队列：按状态筛选（不传状态表示全部），按 id 倒序。
+     * 后台帖子列表：按条件筛选（全部可选），按 id 倒序。
      * <p>用 MyBatis-Plus 的 {@code selectPage} 也能做，但那样要再逐条查作者名
      * （N+1）；这里一次 JOIN 出来，列表页的"作者是谁"是审核的核心信息。
+     * <p><b>SQL 写在 {@code resources/mapper/PostMapper.xml} 里，不是注解</b>：
+     * 这条语句有 5 个可选条件（状态 / 单条 ID / 一批 ID / 作者 / 关键字），
+     * 用注解就得写成 {@code @Select("<script>…")}，而那个写法有个隐蔽陷阱 ——
+     * MyBatis 只在语句<b>以</b> {@code <script>} 开头时才把它当 XML 解析
+     * （见 {@code XMLLanguageDriver.createSqlSource}），一旦有人把 {@code <script>}
+     * 挪到第二行，{@code <if>} 就会被当成 SQL 原文发给数据库 → 语法错误，
+     * 而且<b>只有真跑一次请求才会发现</b>。XML 没有这个陷阱。
+     * <p>筛选条件与 {@link #countForReview} <b>必须逐条保持一致</b>：一个是列表、
+     * 一个是总数，条件不一致就会出现"翻到第 2 页是空的"或"总数永远比实际多"。
+     * 回归守卫：{@code MapperResultSetContractTest}（列数 == record 组件数、
+     * XML 里不出现未转义的 {@code <}/{@code &}）。
      */
-    @Select("""
-            <script>
-            SELECT p.id            AS post_id,
-                   p.author_id     AS author_id,
-                   p.content       AS content,
-                   p.link_count    AS link_count,
-                   p.status        AS status,
-                   p.reviewed_by   AS reviewed_by,
-                   p.review_time   AS review_time,
-                   p.reject_reason AS reject_reason,
-                   p.create_time   AS create_time,
-                   p.update_time   AS update_time,
-                   u.username      AS author_username,
-                   u.nickname      AS author_nickname,
-                   u.real_name     AS author_real_name,
-                   u.class_name    AS author_class_name,
-                   u.avatar_key    AS author_avatar_key,
-                   u.role          AS author_role
-            FROM post p
-            JOIN sys_user u ON u.id = p.author_id
-            WHERE u.deleted = 0
-              <if test="status != null">AND p.status = #{status}</if>
-            ORDER BY p.id DESC
-            LIMIT #{offset}, #{limit}
-            </script>
-            """)
     List<PostRow> selectForReview(@Param("status") Integer status,
+                                  @Param("postId") Long postId,
+                                  @Param("ids") List<Long> ids,
+                                  @Param("authorId") Long authorId,
+                                  @Param("keyword") String keyword,
                                   @Param("offset") long offset,
                                   @Param("limit") long limit);
 
-    /** 审核队列的总数（分页用） */
-    @Select("""
-            <script>
-            SELECT COUNT(*)
-            FROM post p
-            JOIN sys_user u ON u.id = p.author_id
-            WHERE u.deleted = 0
-              <if test="status != null">AND p.status = #{status}</if>
-            </script>
-            """)
-    long countForReview(@Param("status") Integer status);
+    /**
+     * 后台列表的总数（分页用）。筛选条件与 {@link #selectForReview} 逐条对应
+     * （SQL 同样在 {@code PostMapper.xml}）。
+     */
+    long countForReview(@Param("status") Integer status,
+                        @Param("postId") Long postId,
+                        @Param("ids") List<Long> ids,
+                        @Param("authorId") Long authorId,
+                        @Param("keyword") String keyword);
 
     /** 待审核数量（后台导航的角标用） */
     @Select("SELECT COUNT(*) FROM post WHERE status = 0")
     long countPending();
+
+    /**
+     * 某个状态的帖子总数（社区管理台顶部的统计）。
+     * <p>刻意<b>不加</b> {@code u.deleted = 0} 的联表条件，与 {@link #countPending} 口径一致：
+     * 这是"库里有多少条"，而不是"列表里能看到多少条"。两处口径不同会让
+     * 管理台顶部的数字与列表总数对不上，反而更难解释。
+     */
+    @Select("SELECT COUNT(*) FROM post WHERE status = #{status}")
+    long countByStatus(@Param("status") int status);
+
+    /**
+     * 按 ID 批量删除（社区管理台的"彻底删除"）。
+     * <p>用单条 {@code DELETE ... IN (...)} 而不是循环 {@code deleteById}：
+     * 批量删除动辄几十条，一次往返比 N 次更省，事务里也更容易看出"这是一次动作"。
+     * <p>调用方负责先按 ID 取出实体（审计要留痕：删的是谁的什么内容），
+     * 这个方法的职责只有删除。
+     * <p>SQL 同样在 {@code PostMapper.xml}（{@code <foreach>} 属于动态 SQL）。
+     */
+    int deleteByIds(@Param("ids") List<Long> ids);
 
     /** 某作者已通过的帖子数（个人主页的展示用） */
     @Select("SELECT COUNT(*) FROM post WHERE author_id = #{authorId} AND status = 1")
@@ -179,7 +186,7 @@ public interface PostMapper extends BaseMapper<Post> {
     PostRow selectFeedRowById(@Param("id") Long id);
 
     /** 删除某作者的全部帖子（账号彻底删除时级联） */
-    @org.apache.ibatis.annotations.Delete("DELETE FROM post WHERE author_id = #{authorId}")
+    @Delete("DELETE FROM post WHERE author_id = #{authorId}")
     int deleteAllOfAuthor(@Param("authorId") Long authorId);
 
     /**
